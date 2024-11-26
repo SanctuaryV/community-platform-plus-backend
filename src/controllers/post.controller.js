@@ -73,7 +73,7 @@ exports.createPost = (req, res) => {
         }
 
         const { group_id, user_id, content } = req.body;
-        const image_url = req.file ? `/post/${req.file.filename}` : null; // เก็บ path ของรูปภาพ
+        const image_url = req.file ? `https://community-platform-plus-backend.onrender.com/post/${req.file.filename}` : null; // เก็บ path ของรูปภาพ
 
         if (!content && !image_url) {
             return res.status(400).json({ message: 'Content or image is required' });
@@ -165,7 +165,7 @@ exports.updatePost = (req, res) => {
         }
 
         const { post_id, user_id, content } = req.body;
-        const image_url = req.file ? `/post/${req.file.filename}` : null;
+        const image_url = req.file ? `https://community-platform-plus-backend.onrender.com/post/${req.file.filename}` : null;
 
         const getPostQuery = 'SELECT user_id, image_url FROM posts WHERE id = ?';
         connection.query(getPostQuery, [post_id], (err, results) => {

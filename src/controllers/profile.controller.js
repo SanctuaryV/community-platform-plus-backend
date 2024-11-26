@@ -187,7 +187,7 @@ exports.updateUserProfile = [
       }
 
       // 3. อัปเดตโปรไฟล์ใหม่
-      const avatar = req.file ? `/uploads/${req.file.filename}` : null; // URL ของไฟล์ที่อัปโหลด
+      const avatar = req.file ? `https://community-platform-plus-backend.onrender.com/uploads/${req.file.filename}` : null; // URL ของไฟล์ที่อัปโหลด
 
       const sql = `
         UPDATE users 
