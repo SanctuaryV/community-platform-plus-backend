@@ -27,7 +27,7 @@ const server = app.listen(port, () => {
 // สร้างตัว instance ของ socket.io ที่เชื่อมกับ HTTP server และตั้งค่า CORS
 const io = socketIo(server, {
     cors: {
-        origin: "*",  // กำหนดให้รองรับทุก origin หรือกำหนดเฉพาะ IP ที่มือถือใช้
+        origin: "https://community-platform-psi.vercel.app",  // กำหนดให้รองรับทุก origin หรือกำหนดเฉพาะ IP ที่มือถือใช้
         methods: ['GET', 'POST'],
     },
     transports: ['websocket', 'polling'], // ใช้ transport ที่รองรับได้ดี
