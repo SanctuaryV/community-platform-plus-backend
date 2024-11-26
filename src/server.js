@@ -23,6 +23,11 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 const server = app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
+const cors = require('cors');
+app.use(cors({
+    origin: "*",  // หรือระบุโดเมนที่อนุญาตให้เข้าถึง
+    methods: ['GET', 'POST', 'PUT'],
+}));
 
 // สร้างตัว instance ของ socket.io ที่เชื่อมกับ HTTP server และตั้งค่า CORS
 const io = socketIo(server, {
