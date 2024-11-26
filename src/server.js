@@ -4,8 +4,11 @@ const socketIo = require('socket.io');
 const bodyParser = require('body-parser');
 const authRoutes = require('./routes/auth.routes');
 const chat = require('./routes/chat.routes')
+const communityRoutes = require('./routes/community.routes');
 const messageRoutes = require('./routes/messages.routes');
-const profileRoutes = require('./routes/profile.routes');  // เชื่อมโยงกับ profile.routes.js
+const profileRoutes = require('./routes/profile.routes');
+const postRoutes = require('./routes/post.routes');
+const mainRoutes = require('./routes/main.routes');
 const connection = require('./config/db.config');
 const path = require('path');
 
@@ -13,6 +16,7 @@ const app = express();
 const port = 8000;
 app.use(express.json());
 
+app.use('/post', express.static(path.join(__dirname, '..', 'post'))); 
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // สร้าง HTTP server และเชื่อมกับ socket.io
@@ -35,7 +39,10 @@ app.use(bodyParser.json());
 app.use('/', authRoutes);
 app.use('/', messageRoutes);
 app.use('/', profileRoutes);
+app.use('/', communityRoutes);
+app.use('/', postRoutes);
 app.use('/', chat);
+app.use('/', mainRoutes);
 
 // ตรวจสอบการเชื่อมต่อฐานข้อมูล
 connection.connect((err) => {
@@ -48,7 +55,6 @@ connection.connect((err) => {
 
 // เชื่อมต่อกับ socket.io
 io.on('connection', (socket) => {
-    console.log('A user connected');
 
     // เมื่อผู้ใช้เลือกที่จะเข้าร่วมห้อง
     socket.on('joinRoom', (roomId) => {
@@ -79,7 +85,6 @@ io.on('connection', (socket) => {
 
     // เมื่อผู้ใช้หลุดจากห้อง
     socket.on('disconnect', () => {
-        console.log('User disconnected');
     });
 });
 
