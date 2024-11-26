@@ -176,7 +176,7 @@ exports.updateUserProfile = [
 
       // 2. ลบรูปเก่าถ้ามี
       if (oldAvatar) {
-        const oldAvatarPath = path.join(__dirname, '../..', oldAvatar); // ใช้ path.join เพื่อให้แน่ใจว่าพาธถูกต้อง
+        const oldAvatarPath = path.join(__dirname, '../../../../../..', oldAvatar); // ใช้ path.join เพื่อให้แน่ใจว่าพาธถูกต้อง
         console.log('Old Avatar:', oldAvatarPath);
         if (fs.existsSync(oldAvatarPath)) {
           fs.unlinkSync(oldAvatarPath); // ลบไฟล์รูปเก่า
