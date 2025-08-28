@@ -174,20 +174,25 @@ exports.updateUserProfile = [
 
       const oldAvatar = results[0].avatar_url; // ไฟล์โปรไฟล์เก่าที่เก็บในฐานข้อมูล
 
-      // 2. ลบรูปเก่าถ้ามี
+      // 2. ลบรูปเก่าถ้ามี (ถ้าเก็บเป็น URL ให้ใช้เฉพาะชื่อไฟล์)
       if (oldAvatar) {
-        const oldAvatarPath = path.join(__dirname, '../../../../../..', oldAvatar); // ใช้ path.join เพื่อให้แน่ใจว่าพาธถูกต้อง
-        console.log('Old Avatar:', oldAvatarPath);
-        if (fs.existsSync(oldAvatarPath)) {
-          fs.unlinkSync(oldAvatarPath); // ลบไฟล์รูปเก่า
-          console.log(`Old avatar deleted`);
-        } else {
-          console.log('Old avatar file does not exist');
+        try {
+          const oldFilename = path.basename(String(oldAvatar).split('?')[0]);
+          const oldAvatarPath = path.join(__dirname, '../..', 'uploads', oldFilename);
+          console.log('Old Avatar Path:', oldAvatarPath);
+          if (fs.existsSync(oldAvatarPath)) {
+            fs.unlinkSync(oldAvatarPath); // ลบไฟล์รูปเก่า
+            console.log('Old avatar deleted');
+          } else {
+            console.log('Old avatar file does not exist at', oldAvatarPath);
+          }
+        } catch (e) {
+          console.log('Error resolving old avatar path:', e);
         }
       }
 
       // 3. อัปเดตโปรไฟล์ใหม่
-      const avatar = req.file ? `https://community-platform-plus-backend.onrender.com/uploads/${req.file.filename}` : null; // URL ของไฟล์ที่อัปโหลด
+  const avatar = req.file ? `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}` : null; // URL ของไฟล์ที่อัปโหลด (dynamic host)
 
       const sql = `
         UPDATE users 

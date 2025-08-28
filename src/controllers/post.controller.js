@@ -58,6 +58,18 @@ exports.getPosts = (req, res) => {
             } else {
                 post.comments = []; // ถ้าไม่มีคอมเมนต์ ให้ตั้งเป็นอาร์เรย์ว่าง
             }
+
+            // Normalize avatar_url: if it's a filename or relative path, prefix with host
+            if (post.avatar_url && !/^https?:\/\//i.test(post.avatar_url)) {
+                post.avatar_url = `${req.protocol}://${req.get('host')}/uploads/${post.avatar_url.replace(/^\//, '')}`;
+            }
+
+            // Normalize post image_url similarly
+            if (post.image_url && !/^https?:\/\//i.test(post.image_url)) {
+                // if stored as '/post/filename' or 'post/filename', ensure correct absolute URL
+                const filename = post.image_url.replace(/^(?:\/post\/|post\/|\/)*/i, '');
+                post.image_url = `${req.protocol}://${req.get('host')}/post/${filename}`;
+            }
         });
 
         res.status(200).json(results);
@@ -72,8 +84,8 @@ exports.createPost = (req, res) => {
             return res.status(500).json({ message: 'Error uploading file', error: err });
         }
 
-        const { group_id, user_id, content } = req.body;
-        const image_url = req.file ? `https://community-platform-plus-backend.onrender.com/post/${req.file.filename}` : null; // เก็บ path ของรูปภาพ
+    const { group_id, user_id, content } = req.body;
+    const image_url = req.file ? `${req.protocol}://${req.get('host')}/post/${req.file.filename}` : null; // เก็บ path ของรูปภาพ
 
         if (!content && !image_url) {
             return res.status(400).json({ message: 'Content or image is required' });
@@ -137,15 +149,21 @@ exports.deletePost = (req, res) => {
   
       const imageUrl = results[0].image_url;
   
-      // ถ้ามี image_url ให้ลบไฟล์รูปภาพ
-      if (imageUrl) {
-        const imagePath = path.join(__dirname, '../..', imageUrl);
-        fs.unlink(imagePath, (err) => {
-          if (err) {
-            console.error('Error deleting image:', err);
-          }
-        });
-      }
+            // ถ้ามี image_url ให้ลบไฟล์รูปภาพ
+            if (imageUrl) {
+                try {
+                    // imageUrl in DB may be a full URL (http(s)://host/post/filename) or a relative path/filename
+                    const filename = path.basename(String(imageUrl).split('?')[0]);
+                    const imagePath = path.join(__dirname, '../..', 'post', filename);
+                    fs.unlink(imagePath, (err) => {
+                        if (err) {
+                            console.error('Error deleting image:', err);
+                        }
+                    });
+                } catch (e) {
+                    console.error('Error resolving image path for deletion:', e);
+                }
+            }
   
       const deleteQuery = 'DELETE FROM posts WHERE id = ?';
       connection.query(deleteQuery, [post_id], (err, results) => {
@@ -164,8 +182,8 @@ exports.updatePost = (req, res) => {
             return res.status(500).json({ message: 'Error uploading file', error: err });
         }
 
-        const { post_id, user_id, content } = req.body;
-        const image_url = req.file ? `https://community-platform-plus-backend.onrender.com/post/${req.file.filename}` : null;
+    const { post_id, user_id, content } = req.body;
+    const image_url = req.file ? `${req.protocol}://${req.get('host')}/post/${req.file.filename}` : null;
 
         const getPostQuery = 'SELECT user_id, image_url FROM posts WHERE id = ?';
         connection.query(getPostQuery, [post_id], (err, results) => {
@@ -180,14 +198,19 @@ exports.updatePost = (req, res) => {
                 return res.status(403).json({ message: 'You are not authorized to edit this post' });
             }
 
-            // ลบรูปเดิมถ้ามี
+            // ลบรูปเดิมถ้ามี (ตรวจสอบและใช้เฉพาะชื่อไฟล์)
             if (image_url && results[0].image_url) {
-                const oldImagePath = path.join(__dirname, '../../../../../..', results[0].image_url);
-                fs.unlink(oldImagePath, (err) => {
-                    if (err) {
-                        console.error('Error deleting old image:', err);
-                    }
-                });
+                try {
+                    const oldFilename = path.basename(String(results[0].image_url).split('?')[0]);
+                    const oldImagePath = path.join(__dirname, '../..', 'post', oldFilename);
+                    fs.unlink(oldImagePath, (err) => {
+                        if (err) {
+                            console.error('Error deleting old image:', err);
+                        }
+                    });
+                } catch (e) {
+                    console.error('Error resolving old image path:', e);
+                }
             }
 
             const updateQuery = 'UPDATE posts SET content = ?, image_url = ? WHERE id = ?';

@@ -21,9 +21,9 @@ router.post('/addComment', postController.addComment);
 /*router.post('/deleteComment', postController.deleteComment);*/
 
 // เส้นทางสำหรับการเพิ่มไลค์
-/*router.post('/addLike', postController.addLike);*/
+router.post('/addLike', postController.addLike);
 
 // เส้นทางสำหรับการลบไลค์
-/*router.post('/removeLike', postController.removeLike);*/
+router.post('/removeLike', postController.removeLike);
 
 module.exports = router;
