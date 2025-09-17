@@ -174,17 +174,20 @@ exports.updateUserProfile = [
 
       const oldAvatar = results[0].avatar_url; // ไฟล์โปรไฟล์เก่าที่เก็บในฐานข้อมูล
 
-      // 2. ลบรูปเก่าถ้ามี (ถ้าเก็บเป็น URL ให้ใช้เฉพาะชื่อไฟล์)
+      // 2. ลบรูปเก่า เฉพาะกรณีที่ไฟล์ใหม่ไม่ตรงกับไฟล์เก่า
       if (oldAvatar) {
         try {
+          const newFilename = req.file ? req.file.filename : null;
           const oldFilename = path.basename(String(oldAvatar).split('?')[0]);
-          const oldAvatarPath = path.join(__dirname, '../..', 'uploads', oldFilename);
-          console.log('Old Avatar Path:', oldAvatarPath);
-          if (fs.existsSync(oldAvatarPath)) {
-            fs.unlinkSync(oldAvatarPath); // ลบไฟล์รูปเก่า
-            console.log('Old avatar deleted');
-          } else {
-            console.log('Old avatar file does not exist at', oldAvatarPath);
+          if (newFilename && newFilename !== oldFilename) {
+            const oldAvatarPath = path.join(__dirname, '../..', 'uploads', oldFilename);
+            console.log('Old Avatar Path:', oldAvatarPath);
+            if (fs.existsSync(oldAvatarPath)) {
+              fs.unlinkSync(oldAvatarPath); // ลบไฟล์รูปเก่า
+              console.log('Old avatar deleted');
+            } else {
+              console.log('Old avatar file does not exist at', oldAvatarPath);
+            }
           }
         } catch (e) {
           console.log('Error resolving old avatar path:', e);
