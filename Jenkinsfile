@@ -5,12 +5,16 @@ pipeline {
     parameters {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
         string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
+        string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'sanctuaryv/community-platform-plus-backend', description: 'Docker image name for backend')
+
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
     }
 
     environment {
         APP_REPO_URL    = "${params.REPO_URL}"
         APP_REPO_BRANCH = "${params.REPO_BRANCH}"
+        IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
+        IMAGE_TAG = "${BUILD_NUMBER}" 
     }
 
     stages {
@@ -46,6 +50,18 @@ pipeline {
                     serverUrl: '',
                     tenantName: '',
                     useOwnAdditionalOptions: true
+            }
+        }
+
+                stage('Build Docker Image') {
+            steps {
+                dir('backend') {
+                    sh '''
+                        echo "Building backend Docker image..."
+                        docker build --no-cache -t $IMAGE_NAME_BACKEND:$IMAGE_TAG .
+                        docker images | grep $IMAGE_NAME_BACKEND
+                    '''
+                }
             }
         }
     }
