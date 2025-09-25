@@ -55,13 +55,13 @@ pipeline {
 
                 stage('Build Docker Image') {
             steps {
-                dir('backend') {
+             
                     sh '''
                         echo "Building backend Docker image..."
                         docker build --no-cache -t $IMAGE_NAME_BACKEND:$IMAGE_TAG .
                         docker images | grep $IMAGE_NAME_BACKEND
                     '''
-                }
+                
             }
         }
     }
