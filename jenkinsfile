@@ -6,6 +6,7 @@ pipeline {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
         string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
+        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook-test/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Webhook URL')
 
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
     }
@@ -62,6 +63,60 @@ pipeline {
                         docker images | grep $IMAGE_NAME_BACKEND
                     '''
                 
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def jobResult = currentBuild.result ?: 'SUCCESS'
+                def failedStage = 'None'
+                
+                if (jobResult != 'SUCCESS') {
+                    failedStage = env.STAGE_NAME ?: 'Unknown Stage'
+                }
+
+                def payload = [
+                    jobName: env.JOB_NAME,
+                    buildNumber: env.BUILD_NUMBER,
+                    jobResult: jobResult,
+                    isSuccess: jobResult == 'SUCCESS',
+                    triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
+                    startTime: new Date(currentBuild.startTimeInMillis).format("yyyy-MM-dd HH:mm:ss"),
+                    endTime: new Date().format("yyyy-MM-dd HH:mm:ss"),
+                    duration: currentBuild.durationString,
+                    failedStage: failedStage,
+                    repository: [
+                        url: params.REPO_URL,
+                        branch: params.REPO_BRANCH
+                    ],
+                    buildUrl: env.BUILD_URL,
+                    parameters: [
+                        imageName: params.IMAGE_NAME_BACKEND,
+                        runCheckmarx: params.Run_Checkmarx
+                    ]
+                ]
+
+                try {
+                    httpRequest(
+                        httpMode: 'POST',
+                        url: params.N8N_WEBHOOK_URL,
+                        contentType: 'APPLICATION_JSON',
+                        requestBody: groovy.json.JsonOutput.toJson(payload),
+                        timeout: 30,
+                        ignoreSslErrors: true,
+                        acceptType: 'APPLICATION_JSON',
+                        validResponseCodes: '200:299',
+                        quiet: false
+                    )
+                    echo "✅ Webhook sent to n8n (self-signed SSL) successfully"
+                } catch (Exception e) {
+                    echo "❌ Failed to send webhook to n8n: ${e.getMessage()}"
+                    if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
+                        echo "Note: This appears to be an SSL certificate issue with self-signed certificates"
+                    }
+                }
             }
         }
     }
