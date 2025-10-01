@@ -312,5 +312,29 @@ pipeline {
                 }
             }
         }
+
+          stage('Notify n8n') {
+            steps {
+                script {
+                    // Customize your payload
+                    def payload = [
+                        event   : env.BRANCH_NAME == 'main' ? 'push_to_main' : 'pr',
+                        repo    : env.JOB_NAME,
+                        actor   : env.BUILD_USER ?: 'jenkins',
+                        branch  : env.BRANCH_NAME,
+                        build   : env.BUILD_NUMBER,
+                        status  : currentBuild.currentResult,
+                        url     : env.BUILD_URL
+                    ]
+
+                    // Send to your n8n webhook
+                    sh """
+                        curl -s -k -X POST 'https://35.247.160.122:5678/webhook-test/627982e1-ee55-4a89-a91a-901e8436b313' \
+                          -H 'Content-Type: application/json' \
+                          -d '${groovy.json.JsonOutput.toJson(payload)}'
+                    """
+                }
+            }
+        }
     }
 }
