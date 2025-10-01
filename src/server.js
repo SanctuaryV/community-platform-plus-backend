@@ -25,7 +25,7 @@ app.use('/post', express.static(path.join(__dirname, '..', 'post')));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // สร้าง HTTP server และเชื่อมกับ socket.io
-const server = app.listen(port, () => {
+const server = app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
 });
 
