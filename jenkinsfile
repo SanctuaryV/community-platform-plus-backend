@@ -10,7 +10,7 @@ pipeline {
 
     // === Checkmarx toggle ===
     booleanParam(name: 'Run_Checkmarx', defaultValue: true, description: 'Run Checkmarx scan')
-
+  }
 
   environment {
     // === Map params → env ===
@@ -217,4 +217,4 @@ pipeline {
       }
     }
   }
-
+}
