@@ -1,129 +1,216 @@
-
 pipeline {
-    agent any
+  agent any
 
-    parameters {
-        string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
-        string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
-        string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
-        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Production Webhook URL')
+  parameters {
+    string(name: 'REPO_URL',     defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
+    string(name: 'REPO_BRANCH',  defaultValue: 'main', description: 'Branch to checkout')
+    string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
+    string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Production Webhook URL')
 
-        booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
+    // === Checkmarx params ===
+    booleanParam(name: 'Run_Checkmarx', defaultValue: true, description: 'Run Checkmarx scan')
+    string(name: 'CX_SERVER_URL',     defaultValue: 'https://ast.checkmarx.com', description: 'Checkmarx One URL')
+    string(name: 'CX_TENANT',         defaultValue: 'your-tenant', description: 'Checkmarx tenant name')
+    string(name: 'CX_PROJECT_NAME',   defaultValue: 'SanctuaryV/community-platform-plus-backend', description: 'Checkmarx project name')
+    string(name: 'CX_CREDENTIALS_ID', defaultValue: 'checkmarx-oauth-client', description: 'Jenkins Credentials ID for Checkmarx')
+  }
+
+  environment {
+    APP_REPO_URL       = "${params.REPO_URL}"
+    APP_REPO_BRANCH    = "${params.REPO_BRANCH}"
+    IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
+    IMAGE_TAG          = "${BUILD_NUMBER}"
+
+    // === Checkmarx env ===
+    CX_SERVER_URL      = "${params.CX_SERVER_URL}"
+    CX_TENANT          = "${params.CX_TENANT}"
+    CX_PROJECT_NAME    = "${params.CX_PROJECT_NAME}"
+    CX_CREDENTIALS_ID  = "${params.CX_CREDENTIALS_ID}"
+  }
+
+  stages {
+    stage('Clone Repository') {
+      steps {
+        cleanWs()
+        git branch: "${APP_REPO_BRANCH}", url: "${APP_REPO_URL}"
+      }
     }
 
-    environment {
-        APP_REPO_URL    = "${params.REPO_URL}"
-        APP_REPO_BRANCH = "${params.REPO_BRANCH}"
-        IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
-        IMAGE_TAG = "${BUILD_NUMBER}" 
+    stage('Install Dependencies') {
+      steps {
+        sh '''
+          echo "Installing dependencies..."
+          npm ci || npm install
+        '''
+      }
     }
 
-    stages {
-        stage('Clone Repository') {
-            steps {
-                cleanWs()
-                git branch: "${APP_REPO_BRANCH}",
-                    url: "${APP_REPO_URL}"
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                  echo "Installing depaendencies..."
-                  npm install
-                '''
-            }
-        }
-
-
-        stage('SAST - Checkmarx') {
-            when {
-                expression { return params.Run_Checkmarx == true }
-            }
-            steps {
-                checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca"',
-                    baseAuthUrl: '',
-                    branchName: "${APP_REPO_BRANCH}",
-                    checkmarxInstallation: 'Checkmarx',
-                    credentialsId: '',
-                    projectName: "SanctuaryV/community-platform-plus-frontend",
-                    serverUrl: '',
-                    tenantName: '',
-                    useOwnAdditionalOptions: true
-            }
-        }
-
-                stage('Build Docker Image') {
-            steps {
-             
-                    sh '''
-                        echo "Building backend Docker image..."
-                        docker build --no-cache -t $IMAGE_NAME_BACKEND:$IMAGE_TAG .
-                        docker images | grep $IMAGE_NAME_BACKEND
-                    '''
-                
-            }
-        }
+    stage('SAST - Checkmarx') {
+      when { expression { return params.Run_Checkmarx == true } }
+      steps {
+        // ปลั๊กอิน Checkmarx One (AST) — สั่งให้สร้างรายงานเป็น SARIF ลงโฟลเดอร์ reports/
+        checkmarxASTScanner(
+          serverUrl: "${CX_SERVER_URL}",
+          tenantName: "${CX_TENANT}",
+          credentialsId: "${CX_CREDENTIALS_ID}",
+          projectName: "${CX_PROJECT_NAME}",
+          branchName: "${APP_REPO_BRANCH}",
+          checkmarxInstallation: 'Checkmarx',     // ตั้งชื่อ installation ไว้ใน Global Tool Config ถ้ามี
+          useOwnAdditionalOptions: true,
+          additionalOptions: """
+            --scan-types "sast,sca"
+            --sast-incremental true
+            --report-format sarif
+            --output-name checkmarx
+            --output-path reports
+            --break-on-policy-violations true
+          """.trim()
+        )
+      }
     }
 
-    post {
-        always {
-            script {
-                def jobResult = currentBuild.result ?: 'SUCCESS'
-                def failedStage = 'None'
-                
-                if (jobResult != 'SUCCESS') {
-                    failedStage = env.STAGE_NAME ?: 'Unknown Stage'
-                }
-
-                def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
-                def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                dateFormat.setTimeZone(bangkokTimeZone)
-                
-                def payload = [
-                    jobName: env.JOB_NAME,
-                    buildNumber: env.BUILD_NUMBER,
-                    jobResult: jobResult,
-                    isSuccess: jobResult == 'SUCCESS',
-                    triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
-                    startTime: dateFormat.format(new Date(currentBuild.startTimeInMillis)),
-                    endTime: dateFormat.format(new Date()),
-                    duration: currentBuild.durationString,
-                    failedStage: failedStage,
-                    timezone: 'Asia/Bangkok',
-                    repository: [
-                        url: params.REPO_URL,
-                        branch: params.REPO_BRANCH
-                    ],
-                    buildUrl: env.BUILD_URL,
-                    parameters: [
-                        imageName: params.IMAGE_NAME_BACKEND,
-                        runCheckmarx: params.Run_Checkmarx
-                    ]
-                ]
-
-                try {
-                    httpRequest(
-                        httpMode: 'POST',
-                        url: params.N8N_WEBHOOK_URL,
-                        contentType: 'APPLICATION_JSON',
-                        requestBody: groovy.json.JsonOutput.toJson(payload),
-                        timeout: 30,
-                        ignoreSslErrors: true,
-                        acceptType: 'APPLICATION_JSON',
-                        validResponseCodes: '200:299',
-                        quiet: false
-                    )
-                    echo "✅ Webhook sent to n8n (self-signed SSL) successfully"
-                } catch (Exception e) {
-                    echo "❌ Failed to send webhook to n8n: ${e.getMessage()}"
-                    if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
-                        echo "Note: This appears to be an SSL certificate issue with self-signed certificates"
-                    }
-                }
-            }
-        }
+    stage('Publish Checkmarx Report to Jenkins') {
+      when { expression { return params.Run_Checkmarx == true } }
+      steps {
+        // แสดงผล/เทรนด์/แจ้งเตือนด้วย Warnings NG จากไฟล์ SARIF
+        recordIssues(
+          tools: [sarif(pattern: 'reports/*.sarif')],
+          // ตั้งเกณฑ์พังงานเมื่อเจอ High > 0 (ปรับได้)
+          qualityGates: [[threshold: 0, type: 'TOTAL', criticality: 'HIGH']],
+          failOnError: true
+        )
+      }
     }
-}  
 
+    stage('Archive Reports') {
+      when { expression { return params.Run_Checkmarx == true } }
+      steps {
+        archiveArtifacts artifacts: 'reports/**', fingerprint: true
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        sh '''
+          echo "Building backend Docker image..."
+          docker build --no-cache -t $IMAGE_NAME_BACKEND:$IMAGE_TAG .
+          docker images | grep $IMAGE_NAME_BACKEND || true
+        '''
+      }
+    }
+
+    stage('Send Checkmarx Summary to n8n') {
+      when { expression { return params.Run_Checkmarx == true } }
+      steps {
+        script {
+          // อ่าน SARIF และสรุปผลด้วย Groovy (ไม่ต้องพึ่ง jq)
+          def sarifPath = 'reports/checkmarx.sarif'
+          def totalFindings = 0
+          def highCount = 0
+          def mediumCount = 0
+          def lowCount = 0
+
+          if (fileExists(sarifPath)) {
+            def sarifText = readFile(sarifPath)
+            def sarifJson = new groovy.json.JsonSlurperClassic().parseText(sarifText)
+
+            // นับจำนวน findings ตามระดับความรุนแรงจาก SARIF
+            def results = sarifJson?.runs?.getAt(0)?.results ?: []
+            totalFindings = results.size()
+
+            results.each { r ->
+              def lvl = r?.level?.toString()?.toLowerCase()
+              if (lvl == 'error') highCount++
+              else if (lvl == 'warning') mediumCount++
+              else lowCount++
+            }
+          }
+
+          // เตรียม payload ยิงไป n8n
+          def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
+          def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+          dateFormat.setTimeZone(bangkokTimeZone)
+
+          def summary = [
+            tool        : 'checkmarx',
+            project     : CX_PROJECT_NAME,
+            branch      : APP_REPO_BRANCH,
+            total       : totalFindings,
+            high        : highCount,
+            medium      : mediumCount,
+            low         : lowCount,
+            reportUrl   : "${env.BUILD_URL}artifact/reports/checkmarx.sarif",
+            buildNumber : env.BUILD_NUMBER,
+            buildUrl    : env.BUILD_URL,
+            time        : dateFormat.format(new Date())
+          ]
+
+          httpRequest(
+            httpMode: 'POST',
+            url: params.N8N_WEBHOOK_URL,
+            contentType: 'APPLICATION_JSON',
+            requestBody: groovy.json.JsonOutput.toJson(summary),
+            timeout: 30,
+            ignoreSslErrors: true,
+            acceptType: 'APPLICATION_JSON',
+            validResponseCodes: '200:299',
+            quiet: false
+          )
+          echo "✅ Sent Checkmarx summary to n8n"
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      script {
+        def jobResult = currentBuild.result ?: 'SUCCESS'
+        def failedStage = 'None'
+        if (jobResult != 'SUCCESS') {
+          failedStage = env.STAGE_NAME ?: 'Unknown Stage'
+        }
+
+        def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
+        def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+        dateFormat.setTimeZone(bangkokTimeZone)
+
+        def payload = [
+          jobName    : env.JOB_NAME,
+          buildNumber: env.BUILD_NUMBER,
+          jobResult  : jobResult,
+          isSuccess  : jobResult == 'SUCCESS',
+          triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
+          startTime  : dateFormat.format(new Date(currentBuild.startTimeInMillis)),
+          endTime    : dateFormat.format(new Date()),
+          duration   : currentBuild.durationString,
+          failedStage: failedStage,
+          timezone   : 'Asia/Bangkok',
+          repository : [ url: params.REPO_URL, branch: params.REPO_BRANCH ],
+          buildUrl   : env.BUILD_URL,
+          parameters : [ imageName: params.IMAGE_NAME_BACKEND, runCheckmarx: params.Run_Checkmarx ]
+        ]
+
+        try {
+          httpRequest(
+            httpMode: 'POST',
+            url: params.N8N_WEBHOOK_URL,
+            contentType: 'APPLICATION_JSON',
+            requestBody: groovy.json.JsonOutput.toJson(payload),
+            timeout: 30,
+            ignoreSslErrors: true,
+            acceptType: 'APPLICATION_JSON',
+            validResponseCodes: '200:299',
+            quiet: false
+          )
+          echo "✅ Webhook sent to n8n (self-signed SSL) successfully"
+        } catch (Exception e) {
+          echo "❌ Failed to send webhook to n8n: ${e.getMessage()}"
+          if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
+            echo "Note: This appears to be an SSL certificate issue with self-signed certificates"
+          }
+        }
+      }
+    }
+  }
+}
