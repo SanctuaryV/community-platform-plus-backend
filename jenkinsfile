@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -81,6 +80,21 @@ pipeline {
                 def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                 dateFormat.setTimeZone(bangkokTimeZone)
                 
+                def checkmarxReport = null
+                def checkmarxReportPath = 'checkmarx-report.json' // Change if your report file is named differently
+                if (params.Run_Checkmarx) {
+                    try {
+                        def reportFile = new File(checkmarxReportPath)
+                        if (reportFile.exists()) {
+                            checkmarxReport = reportFile.text
+                        } else {
+                            checkmarxReport = '{"error": "Checkmarx report not found."}'
+                        }
+                    } catch (Exception e) {
+                        checkmarxReport = '{"error": "Failed to read Checkmarx report: ' + e.getMessage() + '"}'
+                    }
+                }
+
                 def payload = [
                     jobName: env.JOB_NAME,
                     buildNumber: env.BUILD_NUMBER,
@@ -100,7 +114,8 @@ pipeline {
                     parameters: [
                         imageName: params.IMAGE_NAME_BACKEND,
                         runCheckmarx: params.Run_Checkmarx
-                    ]
+                    ],
+                    checkmarxReport: checkmarxReport
                 ]
 
                 try {
@@ -125,5 +140,5 @@ pipeline {
             }
         }
     }
-}  
+}
 
