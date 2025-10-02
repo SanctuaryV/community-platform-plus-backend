@@ -12,7 +12,6 @@ pipeline {
     booleanParam(name: 'Run_Checkmarx', defaultValue: true, description: 'Run Checkmarx scan')
 
     // === Checkmarx One (ค่า default จาก log ล่าสุดของคุณ) ===
-    string(name: 'CX_SERVER_URL',     defaultValue: 'https://sng.ast.checkmarx.net/', description: 'Checkmarx One URL (base-uri)')
     string(name: 'CX_PROJECT_NAME',   defaultValue: 'SanctuaryV/community-platform-plus-backend', description: 'Checkmarx project name')
   }
 
@@ -23,7 +22,6 @@ pipeline {
     IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
     IMAGE_TAG          = "${BUILD_NUMBER}"
 
-    CX_SERVER_URL      = "${params.CX_SERVER_URL}"
     CX_PROJECT_NAME    = "${params.CX_PROJECT_NAME}"
   }
 
@@ -72,7 +70,7 @@ pipeline {
       steps {
         // ใช้ปลั๊กอิน AST เรียก CLI ใต้ท้องให้ generate SARIF → reports/checkmarx.sarif
         checkmarxASTScanner(
-          serverUrl: "${env.CX_SERVER_URL}",
+          serverUrl: '',
           tenantName: '',
           credentialsId: '',
           projectName: "${env.CX_PROJECT_NAME}",
@@ -85,6 +83,8 @@ pipeline {
             --report-format sarif
             --output-name checkmarx
             --output-path reports
+            --project-groups intern
+            --scan-types "sast,sca"
           """.trim()
         )
       }
