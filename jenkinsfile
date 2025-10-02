@@ -5,7 +5,7 @@ pipeline {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
         string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
-        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Production Webhook URL')
+        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook-test/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Test Webhook URL')
 
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
     }
@@ -83,33 +83,82 @@ pipeline {
                 def checkmarxReport = null
                 if (params.Run_Checkmarx) {
                     try {
-                        // Try to read JSON report first
-                        if (fileExists('checkmarx-ast-results.json')) {
-                            def jsonReport = readFile('checkmarx-ast-results.json')
-                            checkmarxReport = [
-                                format: 'json',
-                                content: jsonReport,
-                                summary: 'Checkmarx AST scan results in JSON format'
-                            ]
-                        } else if (fileExists('checkmarx-ast-results.html')) {
-                            def htmlReport = readFile('checkmarx-ast-results.html')
-                            checkmarxReport = [
-                                format: 'html',
-                                content: htmlReport,
-                                summary: 'Checkmarx AST scan results in HTML format'
-                            ]
-                        } else {
-                            checkmarxReport = [
-                                format: 'error',
-                                content: null,
-                                summary: 'No Checkmarx report files found (checkmarx-ast-results.json or checkmarx-ast-results.html)'
-                            ]
+                        def reportFound = false
+                        def possiblePaths = [
+                            'checkmarx-ast-results.json',
+                            'checkmarx-ast-results.html',
+                            '**/checkmarx-ast-results.json',
+                            '**/checkmarx-ast-results.html'
+                        ]
+                        
+                        // Try to find and read JSON report first
+                        for (path in possiblePaths) {
+                            if (path.endsWith('.json') && fileExists(path)) {
+                                def jsonReport = readFile(path)
+                                checkmarxReport = [
+                                    format: 'json',
+                                    content: jsonReport,
+                                    summary: 'Checkmarx AST scan results in JSON format',
+                                    filePath: path
+                                ]
+                                reportFound = true
+                                break
+                            }
+                        }
+                        
+                        // If JSON not found, try HTML
+                        if (!reportFound) {
+                            for (path in possiblePaths) {
+                                if (path.endsWith('.html') && fileExists(path)) {
+                                    def htmlReport = readFile(path)
+                                    checkmarxReport = [
+                                        format: 'html',
+                                        content: htmlReport,
+                                        summary: 'Checkmarx AST scan results in HTML format',
+                                        filePath: path
+                                    ]
+                                    reportFound = true
+                                    break
+                                }
+                            }
+                        }
+                        
+                        // If still no report found, use find files approach
+                        if (!reportFound) {
+                            def jsonFiles = findFiles(glob: '**/checkmarx-ast-results.json')
+                            def htmlFiles = findFiles(glob: '**/checkmarx-ast-results.html')
+                            
+                            if (jsonFiles.length > 0) {
+                                def jsonReport = readFile(jsonFiles[0].path)
+                                checkmarxReport = [
+                                    format: 'json',
+                                    content: jsonReport,
+                                    summary: 'Checkmarx AST scan results in JSON format',
+                                    filePath: jsonFiles[0].path
+                                ]
+                            } else if (htmlFiles.length > 0) {
+                                def htmlReport = readFile(htmlFiles[0].path)
+                                checkmarxReport = [
+                                    format: 'html',
+                                    content: htmlReport,
+                                    summary: 'Checkmarx AST scan results in HTML format',
+                                    filePath: htmlFiles[0].path
+                                ]
+                            } else {
+                                checkmarxReport = [
+                                    format: 'error',
+                                    content: null,
+                                    summary: 'No Checkmarx report files found in workspace or subdirectories',
+                                    filePath: 'not found'
+                                ]
+                            }
                         }
                     } catch (Exception e) {
                         checkmarxReport = [
                             format: 'error',
                             content: null,
-                            summary: 'Failed to read Checkmarx report: ' + e.getMessage()
+                            summary: 'Failed to read Checkmarx report: ' + e.getMessage(),
+                            filePath: 'error'
                         ]
                     }
                 }
