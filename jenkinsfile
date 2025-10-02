@@ -11,9 +11,6 @@ pipeline {
     // === Checkmarx toggle ===
     booleanParam(name: 'Run_Checkmarx', defaultValue: true, description: 'Run Checkmarx scan')
 
-    // === Checkmarx One (ค่า default จาก log ล่าสุดของคุณ) ===
-    string(name: 'CX_PROJECT_NAME',   defaultValue: 'SanctuaryV/community-platform-plus-backend', description: 'Checkmarx project name')
-  }
 
   environment {
     // === Map params → env ===
@@ -21,8 +18,6 @@ pipeline {
     APP_REPO_BRANCH    = "${params.REPO_BRANCH}"
     IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
     IMAGE_TAG          = "${BUILD_NUMBER}"
-
-    CX_PROJECT_NAME    = "${params.CX_PROJECT_NAME}"
   }
 
   stages {
@@ -66,29 +61,21 @@ pipeline {
     }
 
     stage('SAST - Checkmarx') {
-      when { expression { return params.Run_Checkmarx } }
-      steps {
-        // ใช้ปลั๊กอิน AST เรียก CLI ใต้ท้องให้ generate SARIF → reports/checkmarx.sarif
-        checkmarxASTScanner(
-          serverUrl: '',
-          tenantName: '',
-          credentialsId: '',
-          projectName: "${env.CX_PROJECT_NAME}",
-          branchName: "${env.APP_REPO_BRANCH}",
-          checkmarxInstallation: 'Checkmarx',
-          useOwnAdditionalOptions: true,
-          additionalOptions: """
-            --scan-types "sast,sca"
-            --sast-incremental true
-            --report-format sarif
-            --output-name checkmarx
-            --output-path reports
-            --project-groups intern
-            --scan-types "sast,sca"
-          """.trim()
-        )
-      }
-    }
+            when {
+                expression { return params.Run_Checkmarx == true }
+            }
+            steps {
+                checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --sast-incremental true --report-format sarif --output-name checkmarx --output-path reports',
+                    baseAuthUrl: '',
+                    branchName: "${APP_REPO_BRANCH}",
+                    checkmarxInstallation: 'Checkmarx',
+                    credentialsId: '',
+                    projectName: "SanctuaryV/community-platform-plus-frontend",
+                    serverUrl: '',
+                    tenantName: '',
+                    useOwnAdditionalOptions: true
+            }
+        }
 
     stage('Publish Checkmarx Report to Jenkins') {
       when { expression { return params.Run_Checkmarx } }
