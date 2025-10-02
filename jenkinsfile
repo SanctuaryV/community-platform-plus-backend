@@ -2,26 +2,29 @@ pipeline {
   agent any
 
   parameters {
+    // === Repo & Build ===
     string(name: 'REPO_URL',     defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
     string(name: 'REPO_BRANCH',  defaultValue: 'main', description: 'Branch to checkout')
     string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
     string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Production Webhook URL')
 
-    // === Checkmarx params ===
+    // === Checkmarx toggle ===
     booleanParam(name: 'Run_Checkmarx', defaultValue: true, description: 'Run Checkmarx scan')
-    string(name: 'CX_SERVER_URL',     defaultValue: 'https://ast.checkmarx.com', description: 'Checkmarx One URL')
-    string(name: 'CX_TENANT',         defaultValue: 'your-tenant', description: 'Checkmarx tenant name')
+
+    // === Checkmarx One (ค่า default จาก log ล่าสุดของคุณ) ===
+    string(name: 'CX_SERVER_URL',     defaultValue: 'https://sng.ast.checkmarx.net/', description: 'Checkmarx One URL (base-uri)')
+    string(name: 'CX_TENANT',         defaultValue: 'cxone-truedigital-ast', description: 'Checkmarx tenant name')
     string(name: 'CX_PROJECT_NAME',   defaultValue: 'SanctuaryV/community-platform-plus-backend', description: 'Checkmarx project name')
-    string(name: 'CX_CREDENTIALS_ID', defaultValue: 'checkmarx-oauth-client', description: 'Jenkins Credentials ID for Checkmarx')
+    string(name: 'CX_CREDENTIALS_ID', defaultValue: 'checkmarx-oauth-client', description: 'Jenkins Credentials ID (OAuth/API)')
   }
 
   environment {
+    // === Map params → env ===
     APP_REPO_URL       = "${params.REPO_URL}"
     APP_REPO_BRANCH    = "${params.REPO_BRANCH}"
     IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
     IMAGE_TAG          = "${BUILD_NUMBER}"
 
-    // === Checkmarx env ===
     CX_SERVER_URL      = "${params.CX_SERVER_URL}"
     CX_TENANT          = "${params.CX_TENANT}"
     CX_PROJECT_NAME    = "${params.CX_PROJECT_NAME}"
@@ -29,10 +32,16 @@ pipeline {
   }
 
   stages {
+    stage('Checkout SCM (Jenkinsfile)') {
+      steps {
+        checkout scm
+      }
+    }
+
     stage('Clone Repository') {
       steps {
         cleanWs()
-        git branch: "${APP_REPO_BRANCH}", url: "${APP_REPO_URL}"
+        git branch: "${env.APP_REPO_BRANCH}", url: "${env.APP_REPO_URL}"
       }
     }
 
@@ -40,22 +49,39 @@ pipeline {
       steps {
         sh '''
           echo "Installing dependencies..."
-          npm ci || npm install
+          if command -v npm >/dev/null 2>&1; then
+            npm ci || npm install
+          else
+            echo "npm not found"; exit 1
+          fi
         '''
       }
     }
 
-    stage('SAST - Checkmarx') {
-      when { expression { return params.Run_Checkmarx == true } }
+    stage('Validate Checkmarx Config') {
+      when { expression { return params.Run_Checkmarx } }
       steps {
-        // ปลั๊กอิน Checkmarx One (AST) — สั่งให้สร้างรายงานเป็น SARIF ลงโฟลเดอร์ reports/
+        script {
+          if (!env.CX_SERVER_URL?.trim())   error "CX_SERVER_URL is empty"
+          if (!env.CX_TENANT?.trim())       error "CX_TENANT is empty"
+          if (!env.CX_PROJECT_NAME?.trim()) error "CX_PROJECT_NAME is empty"
+          if (!env.CX_CREDENTIALS_ID?.trim()) error "CX_CREDENTIALS_ID is empty"
+          echo "✅ Checkmarx config OK: ${env.CX_SERVER_URL} | ${env.CX_TENANT} | ${env.CX_PROJECT_NAME}"
+        }
+      }
+    }
+
+    stage('SAST - Checkmarx') {
+      when { expression { return params.Run_Checkmarx } }
+      steps {
+        // ใช้ปลั๊กอิน AST เรียก CLI ใต้ท้องให้ generate SARIF → reports/checkmarx.sarif
         checkmarxASTScanner(
-          serverUrl: "${CX_SERVER_URL}",
-          tenantName: "${CX_TENANT}",
-          credentialsId: "${CX_CREDENTIALS_ID}",
-          projectName: "${CX_PROJECT_NAME}",
-          branchName: "${APP_REPO_BRANCH}",
-          checkmarxInstallation: 'Checkmarx',     // ตั้งชื่อ installation ไว้ใน Global Tool Config ถ้ามี
+          serverUrl: "${env.CX_SERVER_URL}",
+          tenantName: "${env.CX_TENANT}",
+          credentialsId: "${env.CX_CREDENTIALS_ID}",
+          projectName: "${env.CX_PROJECT_NAME}",
+          branchName: "${env.APP_REPO_BRANCH}",
+          checkmarxInstallation: 'Checkmarx',
           useOwnAdditionalOptions: true,
           additionalOptions: """
             --scan-types "sast,sca"
@@ -63,19 +89,17 @@ pipeline {
             --report-format sarif
             --output-name checkmarx
             --output-path reports
-            --break-on-policy-violations true
           """.trim()
         )
       }
     }
 
     stage('Publish Checkmarx Report to Jenkins') {
-      when { expression { return params.Run_Checkmarx == true } }
+      when { expression { return params.Run_Checkmarx } }
       steps {
-        // แสดงผล/เทรนด์/แจ้งเตือนด้วย Warnings NG จากไฟล์ SARIF
+        // แสดงผล + ตั้ง quality gate ด้วย Warnings NG (fail เมื่อ High > 0)
         recordIssues(
           tools: [sarif(pattern: 'reports/*.sarif')],
-          // ตั้งเกณฑ์พังงานเมื่อเจอ High > 0 (ปรับได้)
           qualityGates: [[threshold: 0, type: 'TOTAL', criticality: 'HIGH']],
           failOnError: true
         )
@@ -83,7 +107,7 @@ pipeline {
     }
 
     stage('Archive Reports') {
-      when { expression { return params.Run_Checkmarx == true } }
+      when { expression { return params.Run_Checkmarx } }
       steps {
         archiveArtifacts artifacts: 'reports/**', fingerprint: true
       }
@@ -100,10 +124,9 @@ pipeline {
     }
 
     stage('Send Checkmarx Summary to n8n') {
-      when { expression { return params.Run_Checkmarx == true } }
+      when { expression { return params.Run_Checkmarx } }
       steps {
         script {
-          // อ่าน SARIF และสรุปผลด้วย Groovy (ไม่ต้องพึ่ง jq)
           def sarifPath = 'reports/checkmarx.sarif'
           def totalFindings = 0
           def highCount = 0
@@ -113,28 +136,26 @@ pipeline {
           if (fileExists(sarifPath)) {
             def sarifText = readFile(sarifPath)
             def sarifJson = new groovy.json.JsonSlurperClassic().parseText(sarifText)
-
-            // นับจำนวน findings ตามระดับความรุนแรงจาก SARIF
             def results = sarifJson?.runs?.getAt(0)?.results ?: []
             totalFindings = results.size()
 
+            // Map severity แบบง่ายจาก SARIF level: error=HIGH, warning=MEDIUM, note/none=LOW
             results.each { r ->
-              def lvl = r?.level?.toString()?.toLowerCase()
-              if (lvl == 'error') highCount++
+              def lvl = (r?.level ?: '').toString().toLowerCase()
+              if (lvl == 'error')      highCount++
               else if (lvl == 'warning') mediumCount++
-              else lowCount++
+              else                      lowCount++
             }
           }
 
-          // เตรียม payload ยิงไป n8n
-          def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
-          def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-          dateFormat.setTimeZone(bangkokTimeZone)
+          def bangkokTZ = TimeZone.getTimeZone('Asia/Bangkok')
+          def fmt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+          fmt.setTimeZone(bangkokTZ)
 
           def summary = [
             tool        : 'checkmarx',
-            project     : CX_PROJECT_NAME,
-            branch      : APP_REPO_BRANCH,
+            project     : env.CX_PROJECT_NAME,
+            branch      : env.APP_REPO_BRANCH,
             total       : totalFindings,
             high        : highCount,
             medium      : mediumCount,
@@ -142,7 +163,7 @@ pipeline {
             reportUrl   : "${env.BUILD_URL}artifact/reports/checkmarx.sarif",
             buildNumber : env.BUILD_NUMBER,
             buildUrl    : env.BUILD_URL,
-            time        : dateFormat.format(new Date())
+            time        : fmt.format(new Date())
           ]
 
           httpRequest(
@@ -171,9 +192,9 @@ pipeline {
           failedStage = env.STAGE_NAME ?: 'Unknown Stage'
         }
 
-        def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
-        def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-        dateFormat.setTimeZone(bangkokTimeZone)
+        def bangkokTZ = TimeZone.getTimeZone('Asia/Bangkok')
+        def fmt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+        fmt.setTimeZone(bangkokTZ)
 
         def payload = [
           jobName    : env.JOB_NAME,
@@ -181,8 +202,8 @@ pipeline {
           jobResult  : jobResult,
           isSuccess  : jobResult == 'SUCCESS',
           triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
-          startTime  : dateFormat.format(new Date(currentBuild.startTimeInMillis)),
-          endTime    : dateFormat.format(new Date()),
+          startTime  : fmt.format(new Date(currentBuild.startTimeInMillis)),
+          endTime    : fmt.format(new Date()),
           duration   : currentBuild.durationString,
           failedStage: failedStage,
           timezone   : 'Asia/Bangkok',
