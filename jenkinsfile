@@ -13,9 +13,7 @@ pipeline {
 
     // === Checkmarx One (ค่า default จาก log ล่าสุดของคุณ) ===
     string(name: 'CX_SERVER_URL',     defaultValue: 'https://sng.ast.checkmarx.net/', description: 'Checkmarx One URL (base-uri)')
-    string(name: 'CX_TENANT',         defaultValue: 'cxone-truedigital-ast', description: 'Checkmarx tenant name')
     string(name: 'CX_PROJECT_NAME',   defaultValue: 'SanctuaryV/community-platform-plus-backend', description: 'Checkmarx project name')
-    string(name: 'CX_CREDENTIALS_ID', defaultValue: 'checkmarx-oauth-client', description: 'Jenkins Credentials ID (OAuth/API)')
   }
 
   environment {
@@ -26,9 +24,7 @@ pipeline {
     IMAGE_TAG          = "${BUILD_NUMBER}"
 
     CX_SERVER_URL      = "${params.CX_SERVER_URL}"
-    CX_TENANT          = "${params.CX_TENANT}"
     CX_PROJECT_NAME    = "${params.CX_PROJECT_NAME}"
-    CX_CREDENTIALS_ID  = "${params.CX_CREDENTIALS_ID}"
   }
 
   stages {
@@ -77,8 +73,8 @@ pipeline {
         // ใช้ปลั๊กอิน AST เรียก CLI ใต้ท้องให้ generate SARIF → reports/checkmarx.sarif
         checkmarxASTScanner(
           serverUrl: "${env.CX_SERVER_URL}",
-          tenantName: "${env.CX_TENANT}",
-          credentialsId: "${env.CX_CREDENTIALS_ID}",
+          tenantName: '',
+          credentialsId: '',
           projectName: "${env.CX_PROJECT_NAME}",
           branchName: "${env.APP_REPO_BRANCH}",
           checkmarxInstallation: 'Checkmarx',
