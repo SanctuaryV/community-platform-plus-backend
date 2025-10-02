@@ -52,7 +52,7 @@ pipeline {
                 expression { return params.Run_Checkmarx == true }
             }
             steps {
-                checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --sast-incremental true --report-format sarif --output-name checkmarx --output-path reports',
+                checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca"',
                     baseAuthUrl: '',
                     branchName: "${APP_REPO_BRANCH}",
                     checkmarxInstallation: 'Checkmarx',
