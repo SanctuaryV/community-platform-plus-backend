@@ -81,17 +81,36 @@ pipeline {
                 dateFormat.setTimeZone(bangkokTimeZone)
                 
                 def checkmarxReport = null
-                def checkmarxReportPath = 'checkmarx-report.json' // Change if your report file is named differently
                 if (params.Run_Checkmarx) {
                     try {
-                        def reportFile = new File(checkmarxReportPath)
-                        if (reportFile.exists()) {
-                            checkmarxReport = reportFile.text
+                        // Try to read JSON report first
+                        if (fileExists('checkmarx-ast-results.json')) {
+                            def jsonReport = readFile('checkmarx-ast-results.json')
+                            checkmarxReport = [
+                                format: 'json',
+                                content: jsonReport,
+                                summary: 'Checkmarx AST scan results in JSON format'
+                            ]
+                        } else if (fileExists('checkmarx-ast-results.html')) {
+                            def htmlReport = readFile('checkmarx-ast-results.html')
+                            checkmarxReport = [
+                                format: 'html',
+                                content: htmlReport,
+                                summary: 'Checkmarx AST scan results in HTML format'
+                            ]
                         } else {
-                            checkmarxReport = '{"error": "Checkmarx report not found."}'
+                            checkmarxReport = [
+                                format: 'error',
+                                content: null,
+                                summary: 'No Checkmarx report files found (checkmarx-ast-results.json or checkmarx-ast-results.html)'
+                            ]
                         }
                     } catch (Exception e) {
-                        checkmarxReport = '{"error": "Failed to read Checkmarx report: ' + e.getMessage() + '"}'
+                        checkmarxReport = [
+                            format: 'error',
+                            content: null,
+                            summary: 'Failed to read Checkmarx report: ' + e.getMessage()
+                        ]
                     }
                 }
 
