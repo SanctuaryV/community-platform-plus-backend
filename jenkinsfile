@@ -77,16 +77,21 @@ pipeline {
                     failedStage = env.STAGE_NAME ?: 'Unknown Stage'
                 }
 
+                def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
+                def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+                dateFormat.setTimeZone(bangkokTimeZone)
+                
                 def payload = [
                     jobName: env.JOB_NAME,
                     buildNumber: env.BUILD_NUMBER,
                     jobResult: jobResult,
                     isSuccess: jobResult == 'SUCCESS',
                     triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
-                    startTime: new Date(currentBuild.startTimeInMillis).format("yyyy-MM-dd HH:mm:ss"),
-                    endTime: new Date().format("yyyy-MM-dd HH:mm:ss"),
+                    startTime: dateFormat.format(new Date(currentBuild.startTimeInMillis)),
+                    endTime: dateFormat.format(new Date()),
                     duration: currentBuild.durationString,
                     failedStage: failedStage,
+                    timezone: 'Asia/Bangkok',
                     repository: [
                         url: params.REPO_URL,
                         branch: params.REPO_BRANCH
