@@ -123,28 +123,40 @@ pipeline {
                             }
                         }
                         
-                        // If still no report found, use find files approach
+                        // If still no report found, use shell command to find files
                         if (!reportFound) {
-                            def jsonFiles = findFiles(glob: '**/checkmarx-ast-results.json')
-                            def htmlFiles = findFiles(glob: '**/checkmarx-ast-results.html')
+                            try {
+                                def findResult = sh(script: 'find . -name "checkmarx-ast-results.json" -type f | head -1', returnStdout: true).trim()
+                                if (findResult) {
+                                    def jsonReport = readFile(findResult)
+                                    checkmarxReport = [
+                                        format: 'json',
+                                        content: jsonReport,
+                                        summary: 'Checkmarx AST scan results in JSON format',
+                                        filePath: findResult
+                                    ]
+                                    reportFound = true
+                                }
+                            } catch (Exception e) {
+                                // Try HTML if JSON search failed
+                                try {
+                                    def findResult = sh(script: 'find . -name "checkmarx-ast-results.html" -type f | head -1', returnStdout: true).trim()
+                                    if (findResult) {
+                                        def htmlReport = readFile(findResult)
+                                        checkmarxReport = [
+                                            format: 'html',
+                                            content: htmlReport,
+                                            summary: 'Checkmarx AST scan results in HTML format',
+                                            filePath: findResult
+                                        ]
+                                        reportFound = true
+                                    }
+                                } catch (Exception e2) {
+                                    // Both searches failed
+                                }
+                            }
                             
-                            if (jsonFiles.length > 0) {
-                                def jsonReport = readFile(jsonFiles[0].path)
-                                checkmarxReport = [
-                                    format: 'json',
-                                    content: jsonReport,
-                                    summary: 'Checkmarx AST scan results in JSON format',
-                                    filePath: jsonFiles[0].path
-                                ]
-                            } else if (htmlFiles.length > 0) {
-                                def htmlReport = readFile(htmlFiles[0].path)
-                                checkmarxReport = [
-                                    format: 'html',
-                                    content: htmlReport,
-                                    summary: 'Checkmarx AST scan results in HTML format',
-                                    filePath: htmlFiles[0].path
-                                ]
-                            } else {
+                            if (!reportFound) {
                                 checkmarxReport = [
                                     format: 'error',
                                     content: null,
