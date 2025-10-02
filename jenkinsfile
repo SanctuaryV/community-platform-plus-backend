@@ -47,19 +47,6 @@ pipeline {
       }
     }
 
-    stage('Validate Checkmarx Config') {
-      when { expression { return params.Run_Checkmarx } }
-      steps {
-        script {
-          if (!env.CX_SERVER_URL?.trim())   error "CX_SERVER_URL is empty"
-          if (!env.CX_TENANT?.trim())       error "CX_TENANT is empty"
-          if (!env.CX_PROJECT_NAME?.trim()) error "CX_PROJECT_NAME is empty"
-          if (!env.CX_CREDENTIALS_ID?.trim()) error "CX_CREDENTIALS_ID is empty"
-          echo "✅ Checkmarx config OK: ${env.CX_SERVER_URL} | ${env.CX_TENANT} | ${env.CX_PROJECT_NAME}"
-        }
-      }
-    }
-
     stage('SAST - Checkmarx') {
             when {
                 expression { return params.Run_Checkmarx == true }
