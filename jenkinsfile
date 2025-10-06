@@ -53,21 +53,44 @@ pipeline {
                             tenantName: '',
                             useOwnAdditionalOptions: true
                         
-                        // Immediately after scan, try to find and copy reports
-                        echo "🔍 Searching for Checkmarx temp directories..."
-                        sh 'find . -name "cx.tmp*" -type d || echo "No temp directories found"'
+                        // Immediately after scan, capture and preserve reports before cleanup
+                        echo "🔍 Capturing Checkmarx reports before cleanup..."
                         
-                        echo "📋 Copying Checkmarx reports to workspace root..."
-                        sh '''
-                            # Find and copy JSON reports
-                            find . -name "checkmarx-ast-results.json" -type f -exec cp {} ./checkmarx-report.json \\; || echo "No JSON report found to copy"
+                        // The reports are generated in cx.tmp directories, let's find them immediately
+                        def reportsCaptured = sh(script: '''
+                            # Find all cx.tmp directories and copy reports from them
+                            for tmpdir in cx.tmp*; do
+                                if [ -d "$tmpdir" ]; then
+                                    echo "Found temp directory: $tmpdir"
+                                    if [ -f "$tmpdir/checkmarx-ast-results.json" ]; then
+                                        echo "Copying JSON report from $tmpdir"
+                                        cp "$tmpdir/checkmarx-ast-results.json" ./checkmarx-report.json
+                                    fi
+                                    if [ -f "$tmpdir/checkmarx-ast-results.html" ]; then
+                                        echo "Copying HTML report from $tmpdir"  
+                                        cp "$tmpdir/checkmarx-ast-results.html" ./checkmarx-report.html
+                                    fi
+                                fi
+                            done
                             
-                            # Find and copy HTML reports  
-                            find . -name "checkmarx-ast-results.html" -type f -exec cp {} ./checkmarx-report.html \\; || echo "No HTML report found to copy"
+                            # List what we have now
+                            ls -la checkmarx-report.* 2>/dev/null || echo "No report files found/copied"
                             
-                            # List what we copied
-                            ls -la checkmarx-report.* || echo "No report files copied"
-                        '''
+                            # Also check if files exist for return value
+                            if [ -f "checkmarx-report.json" ] || [ -f "checkmarx-report.html" ]; then
+                                echo "SUCCESS: Reports captured"
+                                exit 0
+                            else
+                                echo "FAILED: No reports captured"
+                                exit 1
+                            fi
+                        ''', returnStatus: true)
+                        
+                        if (reportsCaptured == 0) {
+                            echo "✅ Successfully captured Checkmarx reports"
+                        } else {
+                            echo "⚠️ Failed to capture reports, they may have been cleaned up"
+                        }
                         
                     } catch (Exception e) {
                         echo "❌ Checkmarx scan failed: ${e.getMessage()}"
