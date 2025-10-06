@@ -6,15 +6,14 @@ pipeline {
         string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
         string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook-test/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Test Webhook URL')
-
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
     }
 
     environment {
-        APP_REPO_URL    = "${params.REPO_URL}"
+        APP_REPO_URL = "${params.REPO_URL}"
         APP_REPO_BRANCH = "${params.REPO_BRANCH}"
         IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
-        IMAGE_TAG = "${BUILD_NUMBER}" 
+        IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -29,12 +28,11 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 sh '''
-                  echo "Installing depaendencies..."
-                  npm install
+                    echo "Installing dependencies..."
+                    npm install
                 '''
             }
         }
-
 
         stage('SAST - Checkmarx') {
             when {
@@ -45,8 +43,7 @@ pipeline {
                     try {
                         echo "🔍 Running Checkmarx scan..."
                         
-                        // Run the Checkmarx scan
-                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca"',
+                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --output-name checkmarx --output-path reports',
                             baseAuthUrl: '',
                             branchName: "${APP_REPO_BRANCH}",
                             checkmarxInstallation: 'Checkmarx',
@@ -56,22 +53,83 @@ pipeline {
                             tenantName: '',
                             useOwnAdditionalOptions: true
                         
-                        // Immediately capture report content before cleanup
-                        echo "📋 Capturing Checkmarx reports before cleanup..."
+                        echo "📋 Capturing Checkmarx reports..."
                         
-                        if (fileExists('checkmarx-ast-results.json')) {
-                            echo "✅ Found JSON report, reading content..."
-                            env.CHECKMARX_JSON_REPORT = readFile('checkmarx-ast-results.json')
-                            echo "JSON report captured (${env.CHECKMARX_JSON_REPORT.length()} characters)"
+                        // Debug file discovery
+                        sh '''
+                            echo "Current directory: $(pwd)"
+                            echo "Directory contents:"
+                            ls -la
+                            echo "Searching for Checkmarx files:"
+                            find . -name "*checkmarx*" -type f 2>/dev/null || echo "No checkmarx files found"
+                        '''
+                        
+                        // Capture JSON report
+                        def jsonContent = sh(script: '''
+                            for path in "checkmarx-ast-results.json" "./checkmarx-ast-results.json"; do
+                                if [ -f "$path" ]; then
+                                    echo "FOUND_JSON:$path"
+                                    cat "$path"
+                                    exit 0
+                                fi
+                            done
+                            
+                            json_file=$(find . -name "checkmarx-ast-results.json" -type f 2>/dev/null | head -1)
+                            if [ -n "$json_file" ] && [ -f "$json_file" ]; then
+                                echo "FOUND_JSON:$json_file"
+                                cat "$json_file"
+                                exit 0
+                            fi
+                            
+                            echo "JSON_NOT_FOUND"
+                        ''', returnStdout: true).trim()
+                        
+                        // Capture HTML report
+                        def htmlContent = sh(script: '''
+                            for path in "checkmarx-ast-results.html" "./checkmarx-ast-results.html"; do
+                                if [ -f "$path" ]; then
+                                    echo "FOUND_HTML:$path"
+                                    cat "$path"
+                                    exit 0
+                                fi
+                            done
+                            
+                            html_file=$(find . -name "checkmarx-ast-results.html" -type f 2>/dev/null | head -1)
+                            if [ -n "$html_file" ] && [ -f "$html_file" ]; then
+                                echo "FOUND_HTML:$html_file"
+                                cat "$html_file"
+                                exit 0
+                            fi
+                            
+                            echo "HTML_NOT_FOUND"
+                        ''', returnStdout: true).trim()
+                        
+                        // Process reports
+                        if (jsonContent != "JSON_NOT_FOUND") {
+                            if (jsonContent.startsWith("FOUND_JSON:")) {
+                                def parts = jsonContent.split('\n', 2)
+                                def content = parts.length > 1 ? parts[1] : ""
+                                env.CHECKMARX_JSON_REPORT = content
+                                echo "✅ JSON report captured (${content.length()} chars)"
+                            } else {
+                                env.CHECKMARX_JSON_REPORT = jsonContent
+                                echo "✅ JSON report captured (${jsonContent.length()} chars)"
+                            }
                         } else {
                             echo "❌ JSON report not found"
                             env.CHECKMARX_JSON_REPORT = null
                         }
                         
-                        if (fileExists('checkmarx-ast-results.html')) {
-                            echo "✅ Found HTML report, reading content..."  
-                            env.CHECKMARX_HTML_REPORT = readFile('checkmarx-ast-results.html')
-                            echo "HTML report captured (${env.CHECKMARX_HTML_REPORT.length()} characters)"
+                        if (htmlContent != "HTML_NOT_FOUND") {
+                            if (htmlContent.startsWith("FOUND_HTML:")) {
+                                def parts = htmlContent.split('\n', 2)
+                                def content = parts.length > 1 ? parts[1] : ""
+                                env.CHECKMARX_HTML_REPORT = content
+                                echo "✅ HTML report captured (${content.length()} chars)"
+                            } else {
+                                env.CHECKMARX_HTML_REPORT = htmlContent
+                                echo "✅ HTML report captured (${htmlContent.length()} chars)"
+                            }
                         } else {
                             echo "❌ HTML report not found"
                             env.CHECKMARX_HTML_REPORT = null
@@ -85,19 +143,19 @@ pipeline {
             }
         }
 
-                stage('Build Docker Image') {
+        stage('Build Docker Image') {
             steps {
-             
+                script {
                     sh '''
                         echo "Building backend Docker image..."
                         docker build --no-cache -t $IMAGE_NAME_BACKEND:$IMAGE_TAG .
                         docker images | grep $IMAGE_NAME_BACKEND
                     '''
-                
+                }
             }
         }
-
     }
+
     post {
         always {
             script {
@@ -114,48 +172,44 @@ pipeline {
                 
                 def checkmarxReport = null
                 if (params.Run_Checkmarx) {
-                    echo "🔍 Processing captured Checkmarx reports..."
+                    echo "🔍 Processing Checkmarx reports..."
                     
                     try {
                         if (env.CHECKMARX_JSON_REPORT && env.CHECKMARX_JSON_REPORT != 'null') {
-                            echo "✅ Using captured JSON report (${env.CHECKMARX_JSON_REPORT.length()} characters)"
                             checkmarxReport = [
                                 format: 'json',
                                 content: env.CHECKMARX_JSON_REPORT,
-                                summary: 'Checkmarx AST scan results in JSON format (captured during scan)',
-                                filePath: 'checkmarx-ast-results.json',
+                                summary: 'Checkmarx AST scan results in JSON format',
                                 fileSize: env.CHECKMARX_JSON_REPORT.length(),
                                 captureMethod: 'environment_variable'
                             ]
+                            echo "✅ Using JSON report (${env.CHECKMARX_JSON_REPORT.length()} chars)"
                         } else if (env.CHECKMARX_HTML_REPORT && env.CHECKMARX_HTML_REPORT != 'null') {
-                            echo "✅ Using captured HTML report (${env.CHECKMARX_HTML_REPORT.length()} characters)"
                             checkmarxReport = [
                                 format: 'html',
                                 content: env.CHECKMARX_HTML_REPORT,
-                                summary: 'Checkmarx AST scan results in HTML format (captured during scan)',
-                                filePath: 'checkmarx-ast-results.html',
+                                summary: 'Checkmarx AST scan results in HTML format',
                                 fileSize: env.CHECKMARX_HTML_REPORT.length(),
                                 captureMethod: 'environment_variable'
                             ]
+                            echo "✅ Using HTML report (${env.CHECKMARX_HTML_REPORT.length()} chars)"
                         } else {
-                            echo "❌ No Checkmarx reports were captured during scan"
                             checkmarxReport = [
                                 format: 'error',
                                 content: null,
-                                summary: 'No Checkmarx reports were captured - files may have been cleaned up before capture',
-                                filePath: 'not captured',
+                                summary: 'No Checkmarx reports were captured',
                                 captureMethod: 'failed'
                             ]
+                            echo "❌ No Checkmarx reports captured"
                         }
                     } catch (Exception e) {
-                        echo "❌ Error processing captured Checkmarx reports: ${e.getMessage()}"
                         checkmarxReport = [
                             format: 'error',
                             content: null,
-                            summary: 'Failed to process captured Checkmarx report: ' + e.getMessage(),
-                            filePath: 'error',
+                            summary: 'Error processing Checkmarx report: ' + e.getMessage(),
                             exception: e.getClass().getSimpleName()
                         ]
+                        echo "❌ Error processing Checkmarx reports: ${e.getMessage()}"
                     }
                 } else {
                     echo "⏭️ Checkmarx scan was skipped"
@@ -196,11 +250,11 @@ pipeline {
                         validResponseCodes: '200:299',
                         quiet: false
                     )
-                    echo "✅ Webhook sent to n8n (self-signed SSL) successfully"
+                    echo "✅ Webhook sent to n8n successfully"
                 } catch (Exception e) {
                     echo "❌ Failed to send webhook to n8n: ${e.getMessage()}"
                     if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
-                        echo "Note: This appears to be an SSL certificate issue with self-signed certificates"
+                        echo "Note: SSL certificate issue with self-signed certificates"
                     }
                 }
             }
