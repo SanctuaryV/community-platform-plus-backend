@@ -9,6 +9,7 @@ pipeline {
         string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Production Webhook URL')
 
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
+        booleanParam(name: 'PushToGar', defaultValue: false, description: 'Push to Google Artifact Registry')
     }
 
     environment {
@@ -63,6 +64,25 @@ pipeline {
                         docker images | grep $IMAGE_NAME_BACKEND
                     '''
                 
+            }
+        }
+
+               stage('Push Image to GAR') {
+            when {
+                expression { return params.PushToGar == true }
+            }
+            steps {
+                withCredentials([file(credentialsId: 'GCP-GAR', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    sh '''
+                        echo "Authenticating with GCP..."
+                        gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
+                        gcloud auth configure-docker $DOCKER_REG_URL
+
+                        echo "Tagging and pushing frontend image to GAR..."
+                        docker tag $IMAGE_NAME_FRONTEND:$IMAGE_TAG $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_FRONTEND:$IMAGE_TAG
+                        docker push $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_FRONTEND:$IMAGE_TAG
+                    '''
+                }
             }
         }
 
