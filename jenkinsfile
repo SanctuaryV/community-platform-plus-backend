@@ -5,7 +5,7 @@ pipeline {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
         string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
-        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook-test/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Test Webhook URL')
+        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Test Webhook URL')
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
     }
 
