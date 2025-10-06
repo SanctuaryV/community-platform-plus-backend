@@ -54,9 +54,31 @@ pipeline {
                             tenantName: '',
                             useOwnAdditionalOptions: true
                         
-                        echo "📋 Archiving Checkmarx reports..."
+                        echo "📋 Capturing Checkmarx SARIF report..."
                         
-                        // Archive all reports for later access
+                        // Capture SARIF file content
+                        def sarifContent = sh(script: '''
+                            if [ -f "reports/checkmarx.sarif" ]; then
+                                echo "SARIF_FOUND"
+                                cat "reports/checkmarx.sarif"
+                            else
+                                echo "SARIF_NOT_FOUND"
+                            fi
+                        ''', returnStdout: true).trim()
+                        
+                        // Store SARIF content in environment variable
+                        def sarifNotFound = "SARIF_NOT_FOUND"
+                        def sarifFound = "SARIF_FOUND"
+                        
+                        if (sarifContent != sarifNotFound && sarifContent.startsWith(sarifFound)) {
+                            env.CHECKMARX_SARIF_REPORT = sarifContent.substring(sarifContent.indexOf('\n') + 1)
+                            echo "✅ SARIF report captured (${env.CHECKMARX_SARIF_REPORT.length()} characters)"
+                        } else {
+                            echo "❌ SARIF report not found"
+                            env.CHECKMARX_SARIF_REPORT = null
+                        }
+                        
+                        // Archive reports for backup
                         archiveArtifacts artifacts: 'reports/**', fingerprint: true
                         
                     } catch (Exception e) {
@@ -96,14 +118,43 @@ pipeline {
                 
                 def checkmarxReport = null
                 if (params.Run_Checkmarx) {
-                    echo "🔍 Processing Checkmarx reports..."
-                    checkmarxReport = [
-                        format: 'archived',
-                        summary: 'Checkmarx AST scan results archived as Jenkins artifacts',
-                        location: 'reports/',
-                        captureMethod: 'archiveArtifacts'
-                    ]
-                    echo "✅ Checkmarx reports archived in Jenkins artifacts"
+                    echo "🔍 Processing Checkmarx SARIF report..."
+                    
+                    try {
+                        if (env.CHECKMARX_SARIF_REPORT && env.CHECKMARX_SARIF_REPORT != 'null') {
+                            // Parse SARIF content as JSON to validate and get summary info
+                            def sarifData = readJSON text: env.CHECKMARX_SARIF_REPORT
+                            def runInfo = sarifData.runs?[0]
+                            def resultsCount = runInfo?.results?.size() ?: 0
+                            
+                            checkmarxReport = [
+                                format: 'sarif',
+                                content: env.CHECKMARX_SARIF_REPORT,
+                                summary: "Checkmarx AST scan results in SARIF format with ${resultsCount} findings",
+                                filePath: 'reports/checkmarx.sarif',
+                                fileSize: env.CHECKMARX_SARIF_REPORT.length(),
+                                resultsCount: resultsCount,
+                                captureMethod: 'file_content'
+                            ]
+                            echo "✅ SARIF report processed: ${resultsCount} findings found"
+                        } else {
+                            checkmarxReport = [
+                                format: 'error',
+                                content: null,
+                                summary: 'SARIF report was not captured - file may not exist',
+                                captureMethod: 'failed'
+                            ]
+                            echo "❌ No SARIF report was captured"
+                        }
+                    } catch (Exception e) {
+                        checkmarxReport = [
+                            format: 'error',
+                            content: null,
+                            summary: 'Error processing SARIF report: ' + e.getMessage(),
+                            exception: e.getClass().getSimpleName()
+                        ]
+                        echo "❌ Error processing SARIF report: ${e.getMessage()}"
+                    }
                 } else {
                     echo "⏭️ Checkmarx scan was skipped"
                 }
