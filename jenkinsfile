@@ -43,36 +43,10 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Use a background process to monitor and capture reports during scan
-                        echo "🔍 Starting background monitor for Checkmarx reports..."
-                        
-                        sh '''
-                            # Start background monitor process
-                            (
-                                for i in {1..300}; do  # Monitor for up to 5 minutes
-                                    if ls cx.tmp*/checkmarx-ast-results.* 2>/dev/null; then
-                                        echo "Reports found! Copying..."
-                                        for tmpdir in cx.tmp*; do
-                                            if [ -d "$tmpdir" ]; then
-                                                if [ -f "$tmpdir/checkmarx-ast-results.json" ]; then
-                                                    cp "$tmpdir/checkmarx-ast-results.json" ./checkmarx-report.json
-                                                    echo "JSON report copied from $tmpdir"
-                                                fi
-                                                if [ -f "$tmpdir/checkmarx-ast-results.html" ]; then
-                                                    cp "$tmpdir/checkmarx-ast-results.html" ./checkmarx-report.html
-                                                    echo "HTML report copied from $tmpdir"
-                                                fi
-                                            fi
-                                        done
-                                        break
-                                    fi
-                                    sleep 2
-                                done
-                            ) &
-                        '''
+                        echo "🔍 Running Checkmarx scan..."
                         
                         // Run the Checkmarx scan
-                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format summaryJSON,summaryHTML --output-name checkmarx-results',
+                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca"',
                             baseAuthUrl: '',
                             branchName: "${APP_REPO_BRANCH}",
                             checkmarxInstallation: 'Checkmarx',
@@ -82,12 +56,26 @@ pipeline {
                             tenantName: '',
                             useOwnAdditionalOptions: true
                         
-                        // Give the background process a moment to finish
-                        sleep(3)
+                        // Immediately capture report content before cleanup
+                        echo "📋 Capturing Checkmarx reports before cleanup..."
                         
-                        // Check what we captured
-                        echo "📋 Checking captured reports..."
-                        sh 'ls -la checkmarx-report.* || echo "No reports captured by background monitor"'
+                        if (fileExists('checkmarx-ast-results.json')) {
+                            echo "✅ Found JSON report, reading content..."
+                            env.CHECKMARX_JSON_REPORT = readFile('checkmarx-ast-results.json')
+                            echo "JSON report captured (${env.CHECKMARX_JSON_REPORT.length()} characters)"
+                        } else {
+                            echo "❌ JSON report not found"
+                            env.CHECKMARX_JSON_REPORT = null
+                        }
+                        
+                        if (fileExists('checkmarx-ast-results.html')) {
+                            echo "✅ Found HTML report, reading content..."  
+                            env.CHECKMARX_HTML_REPORT = readFile('checkmarx-ast-results.html')
+                            echo "HTML report captured (${env.CHECKMARX_HTML_REPORT.length()} characters)"
+                        } else {
+                            echo "❌ HTML report not found"
+                            env.CHECKMARX_HTML_REPORT = null
+                        }
                         
                     } catch (Exception e) {
                         echo "❌ Checkmarx scan failed: ${e.getMessage()}"
@@ -126,84 +114,45 @@ pipeline {
                 
                 def checkmarxReport = null
                 if (params.Run_Checkmarx) {
-                    echo "🔍 Searching for Checkmarx reports..."
+                    echo "🔍 Processing captured Checkmarx reports..."
                     
                     try {
-                        // First, let's see what files are in the workspace
-                        echo "📁 Listing workspace contents:"
-                        sh 'ls -la'
-                        
-                        echo "🔍 Searching for any Checkmarx files:"
-                        sh 'find . -name "*checkmarx*" -type f || echo "No checkmarx files found"'
-                        
-                        // First check for copied reports in workspace root
-                        if (fileExists('checkmarx-report.json')) {
-                            echo "✅ Found copied JSON report: checkmarx-report.json"
-                            def jsonContent = readFile('checkmarx-report.json')
+                        if (env.CHECKMARX_JSON_REPORT && env.CHECKMARX_JSON_REPORT != 'null') {
+                            echo "✅ Using captured JSON report (${env.CHECKMARX_JSON_REPORT.length()} characters)"
                             checkmarxReport = [
                                 format: 'json',
-                                content: jsonContent,
-                                summary: 'Checkmarx AST scan results in JSON format (copied to workspace)',
-                                filePath: 'checkmarx-report.json',
-                                fileSize: jsonContent.length()
+                                content: env.CHECKMARX_JSON_REPORT,
+                                summary: 'Checkmarx AST scan results in JSON format (captured during scan)',
+                                filePath: 'checkmarx-ast-results.json',
+                                fileSize: env.CHECKMARX_JSON_REPORT.length(),
+                                captureMethod: 'environment_variable'
                             ]
-                        } else if (fileExists('checkmarx-report.html')) {
-                            echo "✅ Found copied HTML report: checkmarx-report.html"
-                            def htmlContent = readFile('checkmarx-report.html')
+                        } else if (env.CHECKMARX_HTML_REPORT && env.CHECKMARX_HTML_REPORT != 'null') {
+                            echo "✅ Using captured HTML report (${env.CHECKMARX_HTML_REPORT.length()} characters)"
                             checkmarxReport = [
                                 format: 'html',
-                                content: htmlContent,
-                                summary: 'Checkmarx AST scan results in HTML format (copied to workspace)',
-                                filePath: 'checkmarx-report.html',
-                                fileSize: htmlContent.length()
+                                content: env.CHECKMARX_HTML_REPORT,
+                                summary: 'Checkmarx AST scan results in HTML format (captured during scan)',
+                                filePath: 'checkmarx-ast-results.html',
+                                fileSize: env.CHECKMARX_HTML_REPORT.length(),
+                                captureMethod: 'environment_variable'
                             ]
                         } else {
-                            // Fallback: Search for original files
-                            def jsonFile = sh(script: 'find . -name "checkmarx-ast-results.json" -type f | head -1', returnStdout: true).trim()
-                            echo "JSON search result: '${jsonFile}'"
-                            
-                            if (jsonFile && jsonFile != '') {
-                                echo "✅ Found original JSON report: ${jsonFile}"
-                                def jsonContent = readFile(jsonFile)
-                                checkmarxReport = [
-                                    format: 'json',
-                                    content: jsonContent,
-                                    summary: 'Checkmarx AST scan results in JSON format (original location)',
-                                    filePath: jsonFile,
-                                    fileSize: jsonContent.length()
-                                ]
-                            } else {
-                                def htmlFile = sh(script: 'find . -name "checkmarx-ast-results.html" -type f | head -1', returnStdout: true).trim()
-                                echo "HTML search result: '${htmlFile}'"
-                                
-                                if (htmlFile && htmlFile != '') {
-                                    echo "✅ Found original HTML report: ${htmlFile}"
-                                    def htmlContent = readFile(htmlFile)
-                                    checkmarxReport = [
-                                        format: 'html',
-                                        content: htmlContent,
-                                        summary: 'Checkmarx AST scan results in HTML format (original location)',
-                                        filePath: htmlFile,
-                                        fileSize: htmlContent.length()
-                                    ]
-                                } else {
-                                    echo "❌ No Checkmarx report files found anywhere"
-                                    checkmarxReport = [
-                                        format: 'error',
-                                        content: null,
-                                        summary: 'No Checkmarx report files found after thorough search (original and copied)',
-                                        filePath: 'not found',
-                                        searchAttempts: 'Checked copied files and original locations'
-                                    ]
-                                }
-                            }
+                            echo "❌ No Checkmarx reports were captured during scan"
+                            checkmarxReport = [
+                                format: 'error',
+                                content: null,
+                                summary: 'No Checkmarx reports were captured - files may have been cleaned up before capture',
+                                filePath: 'not captured',
+                                captureMethod: 'failed'
+                            ]
                         }
                     } catch (Exception e) {
-                        echo "❌ Error searching for Checkmarx reports: ${e.getMessage()}"
+                        echo "❌ Error processing captured Checkmarx reports: ${e.getMessage()}"
                         checkmarxReport = [
                             format: 'error',
                             content: null,
-                            summary: 'Failed to search for Checkmarx report: ' + e.getMessage(),
+                            summary: 'Failed to process captured Checkmarx report: ' + e.getMessage(),
                             filePath: 'error',
                             exception: e.getClass().getSimpleName()
                         ]
