@@ -44,12 +44,12 @@ pipeline {
                         echo "🔍 Running Checkmarx scan..."
                         
                         // Run Checkmarx scan with custom output path
-                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --output-name checkmarx --output-path reports',
+                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format sarif --output-name checkmarx --output-path reports',
                             baseAuthUrl: '',
                             branchName: "${APP_REPO_BRANCH}",
                             checkmarxInstallation: 'Checkmarx',
                             credentialsId: '',
-                            projectName: "SanctuaryV/community-platform-plus-frontend",
+                            projectName: "SanctuaryV/community-platform-plus-backend",
                             serverUrl: '',
                             tenantName: '',
                             useOwnAdditionalOptions: true
