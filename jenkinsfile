@@ -43,7 +43,36 @@ pipeline {
             steps {
                 script {
                     try {
-                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca"',
+                        // Use a background process to monitor and capture reports during scan
+                        echo "🔍 Starting background monitor for Checkmarx reports..."
+                        
+                        sh '''
+                            # Start background monitor process
+                            (
+                                for i in {1..300}; do  # Monitor for up to 5 minutes
+                                    if ls cx.tmp*/checkmarx-ast-results.* 2>/dev/null; then
+                                        echo "Reports found! Copying..."
+                                        for tmpdir in cx.tmp*; do
+                                            if [ -d "$tmpdir" ]; then
+                                                if [ -f "$tmpdir/checkmarx-ast-results.json" ]; then
+                                                    cp "$tmpdir/checkmarx-ast-results.json" ./checkmarx-report.json
+                                                    echo "JSON report copied from $tmpdir"
+                                                fi
+                                                if [ -f "$tmpdir/checkmarx-ast-results.html" ]; then
+                                                    cp "$tmpdir/checkmarx-ast-results.html" ./checkmarx-report.html
+                                                    echo "HTML report copied from $tmpdir"
+                                                fi
+                                            fi
+                                        done
+                                        break
+                                    fi
+                                    sleep 2
+                                done
+                            ) &
+                        '''
+                        
+                        // Run the Checkmarx scan
+                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format summaryJSON,summaryHTML --output-name checkmarx-results',
                             baseAuthUrl: '',
                             branchName: "${APP_REPO_BRANCH}",
                             checkmarxInstallation: 'Checkmarx',
@@ -53,44 +82,12 @@ pipeline {
                             tenantName: '',
                             useOwnAdditionalOptions: true
                         
-                        // Immediately after scan, capture and preserve reports before cleanup
-                        echo "🔍 Capturing Checkmarx reports before cleanup..."
+                        // Give the background process a moment to finish
+                        sleep(3)
                         
-                        // The reports are generated in cx.tmp directories, let's find them immediately
-                        def reportsCaptured = sh(script: '''
-                            # Find all cx.tmp directories and copy reports from them
-                            for tmpdir in cx.tmp*; do
-                                if [ -d "$tmpdir" ]; then
-                                    echo "Found temp directory: $tmpdir"
-                                    if [ -f "$tmpdir/checkmarx-ast-results.json" ]; then
-                                        echo "Copying JSON report from $tmpdir"
-                                        cp "$tmpdir/checkmarx-ast-results.json" ./checkmarx-report.json
-                                    fi
-                                    if [ -f "$tmpdir/checkmarx-ast-results.html" ]; then
-                                        echo "Copying HTML report from $tmpdir"  
-                                        cp "$tmpdir/checkmarx-ast-results.html" ./checkmarx-report.html
-                                    fi
-                                fi
-                            done
-                            
-                            # List what we have now
-                            ls -la checkmarx-report.* 2>/dev/null || echo "No report files found/copied"
-                            
-                            # Also check if files exist for return value
-                            if [ -f "checkmarx-report.json" ] || [ -f "checkmarx-report.html" ]; then
-                                echo "SUCCESS: Reports captured"
-                                exit 0
-                            else
-                                echo "FAILED: No reports captured"
-                                exit 1
-                            fi
-                        ''', returnStatus: true)
-                        
-                        if (reportsCaptured == 0) {
-                            echo "✅ Successfully captured Checkmarx reports"
-                        } else {
-                            echo "⚠️ Failed to capture reports, they may have been cleaned up"
-                        }
+                        // Check what we captured
+                        echo "📋 Checking captured reports..."
+                        sh 'ls -la checkmarx-report.* || echo "No reports captured by background monitor"'
                         
                     } catch (Exception e) {
                         echo "❌ Checkmarx scan failed: ${e.getMessage()}"
