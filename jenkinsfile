@@ -43,6 +43,7 @@ pipeline {
                     try {
                         echo "🔍 Running Checkmarx scan..."
                         
+                        // Run Checkmarx scan with custom output path
                         checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --output-name checkmarx --output-path reports',
                             baseAuthUrl: '',
                             branchName: "${APP_REPO_BRANCH}",
@@ -53,87 +54,10 @@ pipeline {
                             tenantName: '',
                             useOwnAdditionalOptions: true
                         
-                        echo "📋 Capturing Checkmarx reports..."
+                        echo "📋 Archiving Checkmarx reports..."
                         
-                        // Debug file discovery
-                        sh '''
-                            echo "Current directory: $(pwd)"
-                            echo "Directory contents:"
-                            ls -la
-                            echo "Searching for Checkmarx files:"
-                            find . -name "*checkmarx*" -type f 2>/dev/null || echo "No checkmarx files found"
-                        '''
-                        
-                        // Capture JSON report
-                        def jsonContent = sh(script: '''
-                            for path in "checkmarx-ast-results.json" "./checkmarx-ast-results.json"; do
-                                if [ -f "$path" ]; then
-                                    echo "FOUND_JSON:$path"
-                                    cat "$path"
-                                    exit 0
-                                fi
-                            done
-                            
-                            json_file=$(find . -name "checkmarx-ast-results.json" -type f 2>/dev/null | head -1)
-                            if [ -n "$json_file" ] && [ -f "$json_file" ]; then
-                                echo "FOUND_JSON:$json_file"
-                                cat "$json_file"
-                                exit 0
-                            fi
-                            
-                            echo "JSON_NOT_FOUND"
-                        ''', returnStdout: true).trim()
-                        
-                        // Capture HTML report
-                        def htmlContent = sh(script: '''
-                            for path in "checkmarx-ast-results.html" "./checkmarx-ast-results.html"; do
-                                if [ -f "$path" ]; then
-                                    echo "FOUND_HTML:$path"
-                                    cat "$path"
-                                    exit 0
-                                fi
-                            done
-                            
-                            html_file=$(find . -name "checkmarx-ast-results.html" -type f 2>/dev/null | head -1)
-                            if [ -n "$html_file" ] && [ -f "$html_file" ]; then
-                                echo "FOUND_HTML:$html_file"
-                                cat "$html_file"
-                                exit 0
-                            fi
-                            
-                            echo "HTML_NOT_FOUND"
-                        ''', returnStdout: true).trim()
-                        
-                        // Process reports
-                        if (jsonContent != "JSON_NOT_FOUND") {
-                            if (jsonContent.startsWith("FOUND_JSON:")) {
-                                def parts = jsonContent.split('\n', 2)
-                                def content = parts.length > 1 ? parts[1] : ""
-                                env.CHECKMARX_JSON_REPORT = content
-                                echo "✅ JSON report captured (${content.length()} chars)"
-                            } else {
-                                env.CHECKMARX_JSON_REPORT = jsonContent
-                                echo "✅ JSON report captured (${jsonContent.length()} chars)"
-                            }
-                        } else {
-                            echo "❌ JSON report not found"
-                            env.CHECKMARX_JSON_REPORT = null
-                        }
-                        
-                        if (htmlContent != "HTML_NOT_FOUND") {
-                            if (htmlContent.startsWith("FOUND_HTML:")) {
-                                def parts = htmlContent.split('\n', 2)
-                                def content = parts.length > 1 ? parts[1] : ""
-                                env.CHECKMARX_HTML_REPORT = content
-                                echo "✅ HTML report captured (${content.length()} chars)"
-                            } else {
-                                env.CHECKMARX_HTML_REPORT = htmlContent
-                                echo "✅ HTML report captured (${htmlContent.length()} chars)"
-                            }
-                        } else {
-                            echo "❌ HTML report not found"
-                            env.CHECKMARX_HTML_REPORT = null
-                        }
+                        // Archive all reports for later access
+                        archiveArtifacts artifacts: 'reports/**', fingerprint: true
                         
                     } catch (Exception e) {
                         echo "❌ Checkmarx scan failed: ${e.getMessage()}"
@@ -173,44 +97,13 @@ pipeline {
                 def checkmarxReport = null
                 if (params.Run_Checkmarx) {
                     echo "🔍 Processing Checkmarx reports..."
-                    
-                    try {
-                        if (env.CHECKMARX_JSON_REPORT && env.CHECKMARX_JSON_REPORT != 'null') {
-                            checkmarxReport = [
-                                format: 'json',
-                                content: env.CHECKMARX_JSON_REPORT,
-                                summary: 'Checkmarx AST scan results in JSON format',
-                                fileSize: env.CHECKMARX_JSON_REPORT.length(),
-                                captureMethod: 'environment_variable'
-                            ]
-                            echo "✅ Using JSON report (${env.CHECKMARX_JSON_REPORT.length()} chars)"
-                        } else if (env.CHECKMARX_HTML_REPORT && env.CHECKMARX_HTML_REPORT != 'null') {
-                            checkmarxReport = [
-                                format: 'html',
-                                content: env.CHECKMARX_HTML_REPORT,
-                                summary: 'Checkmarx AST scan results in HTML format',
-                                fileSize: env.CHECKMARX_HTML_REPORT.length(),
-                                captureMethod: 'environment_variable'
-                            ]
-                            echo "✅ Using HTML report (${env.CHECKMARX_HTML_REPORT.length()} chars)"
-                        } else {
-                            checkmarxReport = [
-                                format: 'error',
-                                content: null,
-                                summary: 'No Checkmarx reports were captured',
-                                captureMethod: 'failed'
-                            ]
-                            echo "❌ No Checkmarx reports captured"
-                        }
-                    } catch (Exception e) {
-                        checkmarxReport = [
-                            format: 'error',
-                            content: null,
-                            summary: 'Error processing Checkmarx report: ' + e.getMessage(),
-                            exception: e.getClass().getSimpleName()
-                        ]
-                        echo "❌ Error processing Checkmarx reports: ${e.getMessage()}"
-                    }
+                    checkmarxReport = [
+                        format: 'archived',
+                        summary: 'Checkmarx AST scan results archived as Jenkins artifacts',
+                        location: 'reports/',
+                        captureMethod: 'archiveArtifacts'
+                    ]
+                    echo "✅ Checkmarx reports archived in Jenkins artifacts"
                 } else {
                     echo "⏭️ Checkmarx scan was skipped"
                 }
