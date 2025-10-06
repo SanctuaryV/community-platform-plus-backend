@@ -82,97 +82,68 @@ pipeline {
                 
                 def checkmarxReport = null
                 if (params.Run_Checkmarx) {
+                    echo "🔍 Searching for Checkmarx reports..."
+                    
                     try {
-                        def reportFound = false
-                        def possiblePaths = [
-                            'checkmarx-ast-results.json',
-                            'checkmarx-ast-results.html',
-                            '**/checkmarx-ast-results.json',
-                            '**/checkmarx-ast-results.html'
-                        ]
+                        // First, let's see what files are in the workspace
+                        echo "📁 Listing workspace contents:"
+                        sh 'ls -la'
                         
-                        // Try to find and read JSON report first
-                        for (path in possiblePaths) {
-                            if (path.endsWith('.json') && fileExists(path)) {
-                                def jsonReport = readFile(path)
-                                checkmarxReport = [
-                                    format: 'json',
-                                    content: jsonReport,
-                                    summary: 'Checkmarx AST scan results in JSON format',
-                                    filePath: path
-                                ]
-                                reportFound = true
-                                break
-                            }
-                        }
+                        echo "🔍 Searching for any Checkmarx files:"
+                        sh 'find . -name "*checkmarx*" -type f || echo "No checkmarx files found"'
                         
-                        // If JSON not found, try HTML
-                        if (!reportFound) {
-                            for (path in possiblePaths) {
-                                if (path.endsWith('.html') && fileExists(path)) {
-                                    def htmlReport = readFile(path)
-                                    checkmarxReport = [
-                                        format: 'html',
-                                        content: htmlReport,
-                                        summary: 'Checkmarx AST scan results in HTML format',
-                                        filePath: path
-                                    ]
-                                    reportFound = true
-                                    break
-                                }
-                            }
-                        }
+                        // Search for JSON report
+                        def jsonFile = sh(script: 'find . -name "checkmarx-ast-results.json" -type f | head -1', returnStdout: true).trim()
+                        echo "JSON search result: '${jsonFile}'"
                         
-                        // If still no report found, use shell command to find files
-                        if (!reportFound) {
-                            try {
-                                def findResult = sh(script: 'find . -name "checkmarx-ast-results.json" -type f | head -1', returnStdout: true).trim()
-                                if (findResult) {
-                                    def jsonReport = readFile(findResult)
-                                    checkmarxReport = [
-                                        format: 'json',
-                                        content: jsonReport,
-                                        summary: 'Checkmarx AST scan results in JSON format',
-                                        filePath: findResult
-                                    ]
-                                    reportFound = true
-                                }
-                            } catch (Exception e) {
-                                // Try HTML if JSON search failed
-                                try {
-                                    def findResult = sh(script: 'find . -name "checkmarx-ast-results.html" -type f | head -1', returnStdout: true).trim()
-                                    if (findResult) {
-                                        def htmlReport = readFile(findResult)
-                                        checkmarxReport = [
-                                            format: 'html',
-                                            content: htmlReport,
-                                            summary: 'Checkmarx AST scan results in HTML format',
-                                            filePath: findResult
-                                        ]
-                                        reportFound = true
-                                    }
-                                } catch (Exception e2) {
-                                    // Both searches failed
-                                }
-                            }
+                        if (jsonFile && jsonFile != '') {
+                            echo "✅ Found JSON report: ${jsonFile}"
+                            def jsonContent = readFile(jsonFile)
+                            checkmarxReport = [
+                                format: 'json',
+                                content: jsonContent,
+                                summary: 'Checkmarx AST scan results in JSON format',
+                                filePath: jsonFile,
+                                fileSize: jsonContent.length()
+                            ]
+                        } else {
+                            // Search for HTML report
+                            def htmlFile = sh(script: 'find . -name "checkmarx-ast-results.html" -type f | head -1', returnStdout: true).trim()
+                            echo "HTML search result: '${htmlFile}'"
                             
-                            if (!reportFound) {
+                            if (htmlFile && htmlFile != '') {
+                                echo "✅ Found HTML report: ${htmlFile}"
+                                def htmlContent = readFile(htmlFile)
+                                checkmarxReport = [
+                                    format: 'html',
+                                    content: htmlContent,
+                                    summary: 'Checkmarx AST scan results in HTML format',
+                                    filePath: htmlFile,
+                                    fileSize: htmlContent.length()
+                                ]
+                            } else {
+                                echo "❌ No Checkmarx report files found"
                                 checkmarxReport = [
                                     format: 'error',
                                     content: null,
-                                    summary: 'No Checkmarx report files found in workspace or subdirectories',
-                                    filePath: 'not found'
+                                    summary: 'No Checkmarx report files found after thorough search',
+                                    filePath: 'not found',
+                                    searchAttempts: 'JSON and HTML searches completed'
                                 ]
                             }
                         }
                     } catch (Exception e) {
+                        echo "❌ Error searching for Checkmarx reports: ${e.getMessage()}"
                         checkmarxReport = [
                             format: 'error',
                             content: null,
-                            summary: 'Failed to read Checkmarx report: ' + e.getMessage(),
-                            filePath: 'error'
+                            summary: 'Failed to search for Checkmarx report: ' + e.getMessage(),
+                            filePath: 'error',
+                            exception: e.getClass().getSimpleName()
                         ]
                     }
+                } else {
+                    echo "⏭️ Checkmarx scan was skipped"
                 }
 
                 def payload = [
