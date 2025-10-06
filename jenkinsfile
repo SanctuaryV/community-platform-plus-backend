@@ -7,6 +7,7 @@ pipeline {
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
         choice(name: 'AI_MODEL', choices: ['gemini', 'gpt'], description: 'Select AI model for report generation')
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
+        booleanParam(name: 'PushToGar', defaultValue: false, description: 'Push to Google Artifact Registry')
     }
 
     environment {
@@ -124,6 +125,24 @@ pipeline {
             }
         }
 
+               stage('Push Image to GAR') {
+            when {
+                expression { return params.PushToGar == true }
+            }
+            steps {
+                withCredentials([file(credentialsId: 'GCP-GAR', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    sh '''
+                        echo "Authenticating with GCP..."
+                        gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
+                        gcloud auth configure-docker $DOCKER_REG_URL
+
+                        echo "Tagging and pushing frontend image to GAR..."
+                        docker tag $IMAGE_NAME_FRONTEND:$IMAGE_TAG $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_FRONTEND:$IMAGE_TAG
+                        docker push $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_FRONTEND:$IMAGE_TAG
+                    '''
+                }
+            }
+        }
         stage('Send to n8n') {
             steps {
                 script {
