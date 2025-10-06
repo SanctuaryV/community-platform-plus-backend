@@ -124,8 +124,8 @@ pipeline {
                         if (env.CHECKMARX_SARIF_REPORT && env.CHECKMARX_SARIF_REPORT != 'null') {
                             // Parse SARIF content as JSON to validate and get summary info
                             def sarifData = readJSON text: env.CHECKMARX_SARIF_REPORT
-                            def runInfo = sarifData.runs?[0]
-                            def resultsCount = runInfo?.results?.size() ?: 0
+                            def runInfo = sarifData.runs ? sarifData.runs[0] : null
+                            def resultsCount = (runInfo && runInfo.results) ? runInfo.results.size() : 0
                             
                             checkmarxReport = [
                                 format: 'sarif',
