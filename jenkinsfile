@@ -198,14 +198,13 @@ pipeline {
                     }
                 }
                 
-                // Send custom metrics and logs to Datadog using plugin
+                // Send data to Datadog
                 try {
                     def triggeredBy = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System'
-                    def buildDurationMs = currentBuild.duration ?: 0
-                    def buildDurationSeconds = buildDurationMs / 1000.0
+                    def buildDurationSeconds = (currentBuild.duration ?: 0) / 1000.0
+                    def statusValue = jobResult == 'SUCCESS' ? 1 : 0
                     
-                    // Define common tags for all metrics
-                    def commonTags = [
+                    def tags = [
                         "job_name:${env.JOB_NAME}",
                         "branch:${params.REPO_BRANCH}",
                         "result:${jobResult.toLowerCase()}",
@@ -214,73 +213,28 @@ pipeline {
                         "service:community-platform-backend"
                     ]
                     
-                    datadog(
-                        collectLogs: true,
-                        tags: commonTags
-                    ) {
-                        // Send custom metrics
-                        echo "📊 Sending Datadog metrics..."
-                        
-                        // 1. jenkins.job.duration - Build duration in seconds
+                    datadog(collectLogs: true, tags: tags) {
+                        // Send metrics via StatsD
                         sh """
-                            echo "jenkins.job.duration:${buildDurationSeconds}|g|#${commonTags.join(',')}" | nc -u -w1 localhost 8125 || echo "Failed to send duration metric"
+                            echo "jenkins.job.duration:${buildDurationSeconds}|g|#${tags.join(',')}" | nc -u -w1 localhost 8125
+                            echo "jenkins.job.status:${statusValue}|g|#${tags.join(',')}" | nc -u -w1 localhost 8125
+                            echo "jenkins.job.completed:1|c|#${tags.join(',')}" | nc -u -w1 localhost 8125
                         """
                         
-                        // 2. jenkins.job.status - Build status (1 for success, 0 for failure)
-                        def statusValue = jobResult == 'SUCCESS' ? 1 : 0
-                        sh """
-                            echo "jenkins.job.status:${statusValue}|g|#${commonTags.join(',')}" | nc -u -w1 localhost 8125 || echo "Failed to send status metric"
-                        """
+                        // Send logs
+                        echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
+                        echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
                         
-                        // 3. jenkins.job.completed - Increment counter for completed jobs
-                        sh """
-                            echo "jenkins.job.completed:1|c|#${commonTags.join(',')}" | nc -u -w1 localhost 8125 || echo "Failed to send completion metric"
-                        """
-                        
-                        // 4. Optional: jenkins.executor.count - Number of available executors
-                        try {
-                            def executorCount = Jenkins.instance.computers.sum { it.numExecutors }
+                        if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
+                            echo "Checkmarx scan completed - Report size: ${checkmarxReport.fileSize} characters"
                             sh """
-                                echo "jenkins.executor.count:${executorCount}|g|#${commonTags.join(',')}" | nc -u -w1 localhost 8125 || echo "Failed to send executor count metric"
-                            """
-                        } catch (Exception ex) {
-                            echo "⚠️ Could not get executor count: ${ex.getMessage()}"
-                        }
-                        
-                        // 5. Optional: jenkins.queue.size - Number of jobs in queue
-                        try {
-                            def queueSize = Jenkins.instance.queue.items.length
-                            sh """
-                                echo "jenkins.queue.size:${queueSize}|g|#${commonTags.join(',')}" | nc -u -w1 localhost 8125 || echo "Failed to send queue size metric"
-                            """
-                        } catch (Exception ex) {
-                            echo "⚠️ Could not get queue size: ${ex.getMessage()}"
-                        }
-                        
-                        // Send structured logs
-                        echo "📊 Build completed with status: ${jobResult}"
-                        echo "🏗️ Job: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                        echo "👤 Triggered by: ${triggeredBy}"
-                        echo "⏱️ Duration: ${buildDurationSeconds}s (${currentBuild.durationString})"
-                        echo "🔗 Build URL: ${env.BUILD_URL}"
-                        echo "🌿 Branch: ${params.REPO_BRANCH}"
-                        
-                        if (params.Run_Checkmarx && checkmarxReport) {
-                            echo "🔒 Security Scan Results:"
-                            echo "   📊 Report size: ${checkmarxReport.fileSize ?: 0} characters"
-                            echo "   📝 Format: ${checkmarxReport.format}"
-                            echo "   📍 File path: ${checkmarxReport.filePath}"
-                            
-                            // Send Checkmarx metrics
-                            def checkmarxTags = commonTags + ["scan_type:checkmarx", "report_format:${checkmarxReport.format}"]
-                            sh """
-                                echo "jenkins.checkmarx.report_size:${checkmarxReport.fileSize ?: 0}|g|#${checkmarxTags.join(',')}" | nc -u -w1 localhost 8125 || echo "Failed to send checkmarx metric"
+                                echo "jenkins.checkmarx.report_size:${checkmarxReport.fileSize}|g|#${tags.join(',')},scan_type:checkmarx" | nc -u -w1 localhost 8125
                             """
                         }
                     }
-                    echo "✅ Metrics and logs sent to Datadog successfully"
+                    echo "✅ Data sent to Datadog successfully"
                 } catch (Exception e) {
-                    echo "❌ Failed to send metrics to Datadog: ${e.getMessage()}"
+                    echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
                 }
             }
         }
