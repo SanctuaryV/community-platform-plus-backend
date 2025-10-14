@@ -213,24 +213,63 @@ pipeline {
                         "service:community-platform-backend"
                     ]
                     
-                    datadog(collectLogs: true, tags: tags) {
-                        // Send metrics via StatsD
-                        sh """
-                            echo "jenkins.job.duration:${buildDurationSeconds}|g|#${tags.join(',')}" | nc -u -w1 localhost 8125
-                            echo "jenkins.job.status:${statusValue}|g|#${tags.join(',')}" | nc -u -w1 localhost 8125
-                            echo "jenkins.job.completed:1|c|#${tags.join(',')}" | nc -u -w1 localhost 8125
-                        """
+                    // Send metrics to Datadog API directly
+                    def currentTime = System.currentTimeMillis() / 1000
+                    def datadogPayload = [
+                        series: [
+                            [
+                                metric: "jenkins.job.duration",
+                                points: [[currentTime, buildDurationSeconds as Double]],
+                                type: "gauge",
+                                tags: tags
+                            ],
+                            [
+                                metric: "jenkins.job.status", 
+                                points: [[currentTime, statusValue as Integer]],
+                                type: "gauge",
+                                tags: tags
+                            ],
+                            [
+                                metric: "jenkins.job.completed",
+                                points: [[currentTime, 1]],
+                                type: "count",
+                                tags: tags
+                            ]
+                        ]
+                    ]
+                    
+                    // Add Checkmarx report size if available
+                    if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
+                        def checkmarxTags = tags + ["scan_type:checkmarx"]
+                        datadogPayload.series.add([
+                            metric: "jenkins.checkmarx.report_size",
+                            points: [[currentTime, checkmarxReport.fileSize as Integer]],
+                            type: "gauge", 
+                            tags: checkmarxTags
+                        ])
+                    }
+                    
+                    // Convert to JSON and send to Datadog API
+                    writeJSON file: 'datadog-payload.json', json: datadogPayload
+                    def jsonPayload = readFile('datadog-payload.json')
+                    
+                    httpRequest(
+                        httpMode: 'POST',
+                        url: 'https://api.datadoghq.com/api/v1/series',
+                        customHeaders: [
+                            [name: 'Content-Type', value: 'application/json'],
+                            [name: 'DD-API-KEY', value: env.DATADOG_API_KEY ?: 'your-datadog-api-key-here']
+                        ],
+                        requestBody: jsonPayload,
+                        validResponseCodes: '200:299'
+                    )
                         
-                        // Send logs
-                        echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
-                        echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
-                        
-                        if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
-                            echo "Checkmarx scan completed - Report size: ${checkmarxReport.fileSize} characters"
-                            sh """
-                                echo "jenkins.checkmarx.report_size:${checkmarxReport.fileSize}|g|#${tags.join(',')},scan_type:checkmarx" | nc -u -w1 localhost 8125
-                            """
-                        }
+                    // Send logs  
+                    echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
+                    echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
+                    
+                    if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
+                        echo "Checkmarx scan completed - Report size: ${checkmarxReport.fileSize} characters"
                     }
                     echo "✅ Data sent to Datadog successfully"
                 } catch (Exception e) {
