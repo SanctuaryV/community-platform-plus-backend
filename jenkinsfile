@@ -10,10 +10,16 @@ pipeline {
     }
 
     environment {
-        APP_REPO_URL = "${params.REPO_URL}"
-        APP_REPO_BRANCH = "${params.REPO_BRANCH}"
+        APP_REPO_URL     = "${params.REPO_URL}"
+        APP_REPO_BRANCH  = "${params.REPO_BRANCH}"
         IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_TAG        = "${BUILD_NUMBER}"
+
+        // 👇 ตั้ง Datadog site ให้ตรง region (us: datadoghq.com, eu: datadoghq.eu, ap1: ap1.datadoghq.com)
+        //DD_SITE          = "datadoghq.com"
+        // ถ้าใช้ Agent/CI Visibility ก็สามารถตั้งค่า DD_AGENT_HOST, DD_TRACE_AGENT_PORT เพิ่มได้
+        // DD_AGENT_HOST  = "datadog-agent.default.svc.cluster.local"
+        // DD_TRACE_AGENT_PORT = "8126"
     }
 
     stages {
@@ -42,7 +48,7 @@ pipeline {
                 script {
                     try {
                         echo "🔍 Running Checkmarx scan..."
-                        
+
                         // Run Checkmarx scan with custom output path
                         checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format sarif --output-name checkmarx --output-path reports',
                             baseAuthUrl: '',
@@ -53,9 +59,9 @@ pipeline {
                             serverUrl: '',
                             tenantName: '',
                             useOwnAdditionalOptions: true
-                        
+
                         echo "📋 Capturing Checkmarx SARIF report..."
-                        
+
                         // Capture SARIF file content
                         def sarifContent = sh(script: '''
                             if [ -f "reports/checkmarx.sarif" ]; then
@@ -65,11 +71,11 @@ pipeline {
                                 echo "SARIF_NOT_FOUND"
                             fi
                         ''', returnStdout: true).trim()
-                        
+
                         // Store SARIF content in environment variable
                         def sarifNotFound = "SARIF_NOT_FOUND"
                         def sarifFound = "SARIF_FOUND"
-                        
+
                         if (sarifContent != sarifNotFound && sarifContent.startsWith(sarifFound)) {
                             env.CHECKMARX_SARIF_REPORT = sarifContent.substring(sarifContent.indexOf('\n') + 1)
                             echo "✅ SARIF report captured (${env.CHECKMARX_SARIF_REPORT.length()} characters)"
@@ -77,10 +83,10 @@ pipeline {
                             echo "❌ SARIF report not found"
                             env.CHECKMARX_SARIF_REPORT = null
                         }
-                        
+
                         // Archive reports for backup
                         archiveArtifacts artifacts: 'reports/**', fingerprint: true
-                        
+
                     } catch (Exception e) {
                         echo "❌ Checkmarx scan failed: ${e.getMessage()}"
                         currentBuild.result = 'UNSTABLE'
@@ -107,7 +113,7 @@ pipeline {
             script {
                 def jobResult = currentBuild.result ?: 'SUCCESS'
                 def failedStage = 'None'
-                
+
                 if (jobResult != 'SUCCESS') {
                     failedStage = env.STAGE_NAME ?: 'Unknown Stage'
                 }
@@ -115,28 +121,35 @@ pipeline {
                 def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
                 def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                 dateFormat.setTimeZone(bangkokTimeZone)
-                
+
+                // คำนวณ duration เป็นวินาที (แม่นกว่า durationString)
+                long endMillis = System.currentTimeMillis()
+                long startMillis = currentBuild.startTimeInMillis ?: (endMillis - 1)
+                long durationSec = Math.max(1L, (endMillis - startMillis) / 1000L)
+
                 def checkmarxReport = null
+                def findingsCount = 0
+
                 if (params.Run_Checkmarx) {
                     echo "🔍 Processing Checkmarx SARIF report..."
-                    
+
                     try {
                         if (env.CHECKMARX_SARIF_REPORT && env.CHECKMARX_SARIF_REPORT != 'null') {
                             // Parse SARIF content as JSON to validate and get summary info
                             def sarifData = readJSON text: env.CHECKMARX_SARIF_REPORT
                             def runInfo = sarifData.runs ? sarifData.runs[0] : null
-                            def resultsCount = (runInfo && runInfo.results) ? runInfo.results.size() : 0
-                            
+                            findingsCount = (runInfo && runInfo.results) ? runInfo.results.size() : 0
+
                             checkmarxReport = [
                                 format: 'sarif',
                                 content: env.CHECKMARX_SARIF_REPORT,
-                                summary: "Checkmarx AST scan results in SARIF format with ${resultsCount} findings",
+                                summary: "Checkmarx AST scan results in SARIF format with ${findingsCount} findings",
                                 filePath: 'reports/checkmarx.sarif',
                                 fileSize: env.CHECKMARX_SARIF_REPORT.length(),
-                                resultsCount: resultsCount,
+                                resultsCount: findingsCount,
                                 captureMethod: 'file_content'
                             ]
-                            echo "✅ SARIF report processed: ${resultsCount} findings found"
+                            echo "✅ SARIF report processed: ${findingsCount} findings found"
                         } else {
                             checkmarxReport = [
                                 format: 'error',
@@ -160,28 +173,123 @@ pipeline {
                 }
 
                 def payload = [
-                    jobName: env.JOB_NAME,
-                    buildNumber: env.BUILD_NUMBER,
-                    jobResult: jobResult,
-                    isSuccess: jobResult == 'SUCCESS',
-                    triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
-                    startTime: dateFormat.format(new Date(currentBuild.startTimeInMillis)),
-                    endTime: dateFormat.format(new Date()),
-                    duration: currentBuild.durationString,
-                    failedStage: failedStage,
-                    timezone: 'Asia/Bangkok',
-                    repository: [
-                        url: params.REPO_URL,
+                    jobName     : env.JOB_NAME,
+                    buildNumber : env.BUILD_NUMBER,
+                    jobResult   : jobResult,
+                    isSuccess   : jobResult == 'SUCCESS',
+                    triggeredBy : currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
+                    startTime   : dateFormat.format(new Date(startMillis)),
+                    endTime     : dateFormat.format(new Date(endMillis)),
+                    duration    : "${durationSec}s",
+                    failedStage : failedStage,
+                    timezone    : 'Asia/Bangkok',
+                    repository  : [
+                        url   : params.REPO_URL,
                         branch: params.REPO_BRANCH
                     ],
-                    buildUrl: env.BUILD_URL,
-                    parameters: [
-                        imageName: params.IMAGE_NAME_BACKEND,
+                    buildUrl    : env.BUILD_URL,
+                    parameters  : [
+                        imageName  : params.IMAGE_NAME_BACKEND,
                         runCheckmarx: params.Run_Checkmarx
                     ],
                     checkmarxReport: checkmarxReport
                 ]
 
+                /***************
+                 * Datadog: ส่ง Event + Metrics
+                 ***************/
+                try {
+                    withCredentials([string(credentialsId: 'DATADOG_API_KEY', variable: 'DD_API_KEY')]) {
+
+                        // 1) ส่ง Event เข้า Datadog Event Stream
+                        def ddEvent = [
+                            title          : "Jenkins ${env.JOB_NAME} #${env.BUILD_NUMBER} ${payload.isSuccess ? 'SUCCESS' : 'FAILED'}",
+                            text           : """\
+**Result**: ${payload.jobResult}
+**Repo**: ${payload.repository.url} (${payload.repository.branch})
+**Duration**: ${payload.duration}
+**Build URL**: ${payload.buildUrl}
+${payload.checkmarxReport ? "**Checkmarx**: ${payload.checkmarxReport.summary}" : ""}
+""".stripIndent(),
+                            tags           : [
+                                "service:community-platform-plus-backend",
+                                "env:ci",
+                                "jenkins_job:${env.JOB_NAME}",
+                                "branch:${params.REPO_BRANCH}",
+                                "result:${payload.jobResult.toLowerCase()}",
+                                "run_checkmarx:${params.Run_Checkmarx}"
+                            ],
+                            alert_type     : (payload.isSuccess ? "success" : "error"),
+                            aggregation_key: "jenkins:${env.JOB_NAME}"
+                        ]
+
+                        def site = env.DD_SITE ?: "datadoghq.com"
+
+                        httpRequest(
+                            httpMode: 'POST',
+                            url: "https://api.${site}/api/v1/events",
+                            customHeaders: [
+                                [name: 'Content-Type', value: 'application/json'],
+                                [name: 'DD-API-KEY', value: "${env.DD_API_KEY}"]
+                            ],
+                            requestBody: groovy.json.JsonOutput.toJson(ddEvent),
+                            validResponseCodes: '200:299',
+                            consoleLogResponseBody: false,
+                            timeout: 30
+                        )
+                        echo "✅ Datadog event sent"
+                        // 2) ส่ง Metrics (build duration + findings count) เข้า Metrics API v2
+                        // หมายเหตุ: submit metrics ใช้ API Key พอ ไม่ต้อง App Key
+                        def nowSec = (long)(System.currentTimeMillis() / 1000L)
+                        def ddSeries = [
+                            series: [
+                                [
+                                    metric: "jenkins.build.duration",
+                                    points: [[nowSec, durationSec]],
+                                    type  :  "gauge",
+                                    tags  : [
+                                        "service:community-platform-plus-backend",
+                                        "env:ci",
+                                        "jenkins_job:${env.JOB_NAME}",
+                                        "branch:${params.REPO_BRANCH}",
+                                        "result:${payload.jobResult.toLowerCase()}"
+                                    ]
+                                ],
+                                [
+                                    metric: "jenkins.checkmarx.findings",
+                                    points: [[nowSec, findingsCount]],
+                                    type  :  "gauge",
+                                    tags  : [
+                                        "service:community-platform-plus-backend",
+                                        "env:ci",
+                                        "jenkins_job:${env.JOB_NAME}",
+                                        "branch:${params.REPO_BRANCH}"
+                                    ]
+                                ]
+                            ]
+                        ]
+
+                        httpRequest(
+                            httpMode: 'POST',
+                            url: "https://api.${site}/api/v2/series",
+                            customHeaders: [
+                                [name: 'Content-Type', value: 'application/json'],
+                                [name: 'DD-API-KEY', value: "${env.DD_API_KEY}"]
+                            ],
+                            requestBody: groovy.json.JsonOutput.toJson(ddSeries),
+                            validResponseCodes: '200:299',
+                            consoleLogResponseBody: false,
+                            timeout: 30
+                        )
+                        echo "✅ Datadog metrics sent"
+                    }
+                } catch (Exception e) {
+                    echo "❌ Datadog send failed: ${e.getMessage()}"
+                }
+
+                /***************
+                 * ของเดิม: ยิง webhook ไป n8n
+                 ***************/
                 try {
                     httpRequest(
                         httpMode: 'POST',
@@ -205,4 +313,3 @@ pipeline {
         }
     }
 }
-
