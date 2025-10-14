@@ -213,26 +213,20 @@ pipeline {
                         "service:community-platform-backend"
                     ]
                     
-                    // Send metrics using Datadog plugin
+                    // Send data to Datadog using plugin
                     datadog(collectLogs: true, tags: tags) {
-                        // Send custom metrics
-                        publishDatadog metric: [
-                            [name: "jenkins.job.duration", value: buildDurationSeconds, type: "gauge"],
-                            [name: "jenkins.job.status", value: statusValue, type: "gauge"],
-                            [name: "jenkins.job.completed", value: 1, type: "count"]
-                        ]
+                        // Log structured data for Datadog to collect
+                        echo "DATADOG_METRIC: jenkins.job.duration=${buildDurationSeconds} type=gauge"
+                        echo "DATADOG_METRIC: jenkins.job.status=${statusValue} type=gauge" 
+                        echo "DATADOG_METRIC: jenkins.job.completed=1 type=count"
                         
-                        // Send logs
+                        // Send standard logs
                         echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
                         echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
                         
                         if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
                             echo "Checkmarx scan completed - Report size: ${checkmarxReport.fileSize} characters"
-                            // Send Checkmarx metric with additional tag
-                            def checkmarxTags = tags + ["scan_type:checkmarx"]
-                            publishDatadog metric: [
-                                [name: "jenkins.checkmarx.report_size", value: checkmarxReport.fileSize, type: "gauge"]
-                            ], tags: checkmarxTags
+                            echo "DATADOG_METRIC: jenkins.checkmarx.report_size=${checkmarxReport.fileSize} type=gauge scan_type=checkmarx"
                         }
                     }
                     echo "✅ Data sent to Datadog successfully"
