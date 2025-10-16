@@ -3,7 +3,9 @@ pipeline {
 
     parameters {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
-        string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
+        string(name: 'REPO_BRANCH', defaultValue: 'main',                     // Expected filename pattern from n8n (with hyphens)
+                    def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
+                    def outFile = "reports/${expectedFileName}"cription: 'Branch to checkout')
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
         string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Test Webhook URL')
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
@@ -249,7 +251,7 @@ pipeline {
                     def reportReceived = false
                     def buildNumber = env.BUILD_NUMBER
                     
-                    // Expected filename pattern from n8n
+                    // Expected filename pattern from n8n (with spaces, not hyphens)
                     def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
                     def outFile = "reports/${expectedFileName}"
                     
@@ -257,6 +259,12 @@ pipeline {
                     
                     while (totalWaitTime < maxWaitTime && !reportReceived) {
                         echo "🔍 Looking for file: ${expectedFileName} (${totalWaitTime}s/${maxWaitTime}s)"
+                        
+                        // Debug: List all files in workspace to see what's actually there
+                        echo "📂 Current workspace files:"
+                        sh "ls -la | head -20"
+                        echo "📂 Files matching 'Report*':"
+                        sh "ls -la Report* 2>/dev/null || echo 'No Report* files found'"
                         
                         // Check if the file exists in current workspace (where n8n might drop it)
                         def fileExists = sh(
