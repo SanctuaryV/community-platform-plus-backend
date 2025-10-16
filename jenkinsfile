@@ -104,7 +104,7 @@ pipeline {
         stage('Send Data to n8n & Datadog') {
             steps {
                 script {
-                def jobResult = currentBuild.result ?: 'SUCCESS'
+                    def jobResult = currentBuild.result ?: 'SUCCESS'
                 def failedStage = 'None'
                 
                 if (jobResult != 'SUCCESS') {
@@ -231,6 +231,7 @@ pipeline {
                     echo "✅ Data sent to Datadog successfully"
                 } catch (Exception e) {
                     echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
+                }
                 }
             }
         }
