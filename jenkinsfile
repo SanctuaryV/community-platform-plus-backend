@@ -178,7 +178,7 @@ pipeline {
                     checkmarxReport: checkmarxReport
                 ]
 
-                // Send data to n8n (just trigger processing)
+                // Send data to n8n and wait for HTML report
                 try {
                     def res = httpRequest(
                         httpMode: 'POST',
@@ -191,6 +191,73 @@ pipeline {
                     )
                     echo "✅ Data sent to n8n successfully - Status: ${res.status}"
                     echo "🔄 n8n is now processing the data to generate HTML report..."
+                    
+                    // Wait for n8n to generate and provide HTML report
+                    echo "⏳ Waiting for n8n to generate HTML report..."
+                    
+                    def maxWaitTime = 300 // 5 minutes
+                    def waitInterval = 15 // Check every 15 seconds
+                    def totalWaitTime = 0
+                    def reportReceived = false
+                    def buildNumber = env.BUILD_NUMBER
+                    
+                    // Expected filename pattern from n8n
+                    def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
+                    def outFile = "reports/${expectedFileName}"
+                    
+                    while (totalWaitTime < maxWaitTime && !reportReceived) {
+                        echo "🔍 Looking for file: ${expectedFileName} (${totalWaitTime}s/${maxWaitTime}s)"
+                        
+                        // Debug: List files matching 'Report*'
+                        sh "ls -la Report* 2>/dev/null || echo 'No Report* files found yet'"
+                        
+                        // Check if the file exists in current workspace
+                        def fileExists = sh(
+                            script: "test -f '${expectedFileName}' && echo 'true' || echo 'false'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (fileExists == 'true') {
+                            echo "✅ Found HTML report file: ${expectedFileName}"
+                            
+                            try {
+                                // Move file to reports directory and check content
+                                sh "cp '${expectedFileName}' '${outFile}'"
+                                def fileContent = readFile(outFile)
+                                
+                                if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
+                                    reportReceived = true
+                                    echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
+                                    
+                                    // Archive the HTML report
+                                    archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
+                                    echo "📁 Report archived as Jenkins artifact: ${outFile}"
+                                    
+                                    // Clean up original file
+                                    sh "rm -f '${expectedFileName}'"
+                                } else {
+                                    echo "⚠️ File found but doesn't contain valid HTML content yet..."
+                                    sh "rm -f '${outFile}'" // Remove invalid file
+                                }
+                            } catch (Exception e) {
+                                echo "⚠️ Error processing found file: ${e.getMessage()}"
+                            }
+                        } else {
+                            echo "⏱️ File not found in workspace yet..."
+                        }
+                        
+                        if (!reportReceived) {
+                            sleep(waitInterval)
+                            totalWaitTime += waitInterval
+                        }
+                    }
+                    
+                    if (!reportReceived) {
+                        echo "⚠️ Timeout: HTML report was not received after ${maxWaitTime} seconds"
+                        echo "💡 n8n might still be processing - check manually later"
+                    } else {
+                        echo "🎉 HTML report successfully received and archived!"
+                    }
                     
                 } catch (Exception e) {
                     echo "❌ Failed to send data to n8n: ${e.getMessage()}"
@@ -238,82 +305,7 @@ pipeline {
             }
         }
 
-        stage('Wait for n8n HTML Report') {
-            steps {
-                script {
-                    echo "⏳ Waiting for n8n to generate and provide HTML report..."
-                    
-                    def maxWaitTime = 300 // 5 minutes
-                    def waitInterval = 15 // Check every 15 seconds
-                    def totalWaitTime = 0
-                    def reportReceived = false
-                    def buildNumber = env.BUILD_NUMBER
-                    
-                    // Expected filename pattern from n8n (with spaces, not hyphens)
-                    def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
-                    def outFile = "reports/${expectedFileName}"
-                    
-                    sh 'mkdir -p reports'
-                    
-                    while (totalWaitTime < maxWaitTime && !reportReceived) {
-                        echo "🔍 Looking for file: ${expectedFileName} (${totalWaitTime}s/${maxWaitTime}s)"
-                        
-                        // Debug: List all files in workspace to see what's actually there
-                        echo "📂 Current workspace files:"
-                        sh "ls -la | head -20"
-                        echo "📂 Files matching 'Report*':"
-                        sh "ls -la Report* 2>/dev/null || echo 'No Report* files found'"
-                        
-                        // Check if the file exists in current workspace (where n8n might drop it)
-                        def fileExists = sh(
-                            script: "test -f '${expectedFileName}' && echo 'true' || echo 'false'",
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (fileExists == 'true') {
-                            echo "✅ Found HTML report file: ${expectedFileName}"
-                            
-                            try {
-                                // Move file to reports directory and check content
-                                sh "cp '${expectedFileName}' '${outFile}'"
-                                def fileContent = readFile(outFile)
-                                
-                                if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
-                                    reportReceived = true
-                                    echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
-                                    
-                                    // Archive the HTML report
-                                    archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
-                                    echo "📁 Report archived as Jenkins artifact: ${outFile}"
-                                    
-                                    // Clean up original file
-                                    sh "rm -f '${expectedFileName}'"
-                                } else {
-                                    echo "⚠️ File found but doesn't contain valid HTML content yet..."
-                                    sh "rm -f '${outFile}'" // Remove invalid file
-                                }
-                            } catch (Exception e) {
-                                echo "⚠️ Error processing found file: ${e.getMessage()}"
-                            }
-                        } else {
-                            echo "⏱️ File not found in workspace yet..."
-                        }
-                        
-                        if (!reportReceived) {
-                            sleep(waitInterval)
-                            totalWaitTime += waitInterval
-                        }
-                    }
-                    
-                    if (!reportReceived) {
-                        echo "⚠️ Timeout: HTML report was not received after ${maxWaitTime} seconds"
-                        echo "💡 n8n might still be processing - check manually later"
-                    }
-                    
-                    echo "🏁 Pipeline completed!"
-                }
-            }
-        }
+
     }
 }
 
