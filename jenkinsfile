@@ -249,49 +249,48 @@ pipeline {
                     def reportReceived = false
                     def buildNumber = env.BUILD_NUMBER
                     
-                    // You'll need to configure n8n to provide a status endpoint or file drop location
-                    def reportUrl = params.N8N_WEBHOOK_URL.replace('/webhook/', '/report/') + "?buildNumber=${buildNumber}"
-                    def outFile = "reports/report-build-${buildNumber}.html"
+                    // Expected filename pattern from n8n
+                    def expectedFileName = "Report jenkins-checkmarx-test-build-${buildNumber}.html"
+                    def outFile = "reports/${expectedFileName}"
                     
                     sh 'mkdir -p reports'
                     
                     while (totalWaitTime < maxWaitTime && !reportReceived) {
-                        try {
-                            echo "🔍 Checking for report... (${totalWaitTime}s/${maxWaitTime}s)"
+                        echo "🔍 Looking for file: ${expectedFileName} (${totalWaitTime}s/${maxWaitTime}s)"
+                        
+                        // Check if the file exists in current workspace (where n8n might drop it)
+                        def fileExists = sh(
+                            script: "test -f '${expectedFileName}' && echo 'true' || echo 'false'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (fileExists == 'true') {
+                            echo "✅ Found HTML report file: ${expectedFileName}"
                             
-                            // Try to get the HTML report from n8n
-                            def reportRes = httpRequest(
-                                httpMode: 'GET',
-                                url: reportUrl,
-                                timeout: 30,
-                                ignoreSslErrors: true,
-                                validResponseCodes: '200,404',
-                                outputFile: outFile
-                            )
-                            
-                            if (reportRes.status == 200) {
-                                // Check if we got actual HTML content (not just JSON)
+                            try {
+                                // Move file to reports directory and check content
+                                sh "cp '${expectedFileName}' '${outFile}'"
                                 def fileContent = readFile(outFile)
+                                
                                 if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
                                     reportReceived = true
-                                    echo "✅ HTML report received! Size: ${fileContent.length()} characters"
+                                    echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
                                     
                                     // Archive the HTML report
                                     archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
                                     echo "📁 Report archived as Jenkins artifact: ${outFile}"
+                                    
+                                    // Clean up original file
+                                    sh "rm -f '${expectedFileName}'"
                                 } else {
-                                    echo "⚠️ Received response but not HTML content yet..."
+                                    echo "⚠️ File found but doesn't contain valid HTML content yet..."
+                                    sh "rm -f '${outFile}'" // Remove invalid file
                                 }
-                            } else {
-                                echo "📋 Report not ready yet (HTTP ${reportRes.status})"
+                            } catch (Exception e) {
+                                echo "⚠️ Error processing found file: ${e.getMessage()}"
                             }
-                            
-                        } catch (Exception e) {
-                            if (e.getMessage().contains('404')) {
-                                echo "⏱️ Report not ready yet..."
-                            } else {
-                                echo "⚠️ Error checking for report: ${e.getMessage()}"
-                            }
+                        } else {
+                            echo "⏱️ File not found in workspace yet..."
                         }
                         
                         if (!reportReceived) {
