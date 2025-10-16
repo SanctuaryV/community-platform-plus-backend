@@ -178,28 +178,22 @@ pipeline {
                     checkmarxReport: checkmarxReport
                 ]
 
-                // Send to n8n and get HTML file back
-                def outFile = "reports/report-build-${env.BUILD_NUMBER}.html"
-                
+                // Send data to n8n (just trigger processing)
                 try {
                     def res = httpRequest(
                         httpMode: 'POST',
                         url: params.N8N_WEBHOOK_URL,
                         contentType: 'APPLICATION_JSON',
                         requestBody: groovy.json.JsonOutput.toJson(payload),
-                        timeout: 120,
+                        timeout: 30,
                         ignoreSslErrors: true,
-                        validResponseCodes: '200:299',
-                        outputFile: outFile
+                        validResponseCodes: '200:299'
                     )
-                    echo "✅ n8n response status: ${res.status}"
-                    echo "✅ HTML report saved to: ${outFile}"
-                    
-                    // Archive the HTML report
-                    archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
+                    echo "✅ Data sent to n8n successfully - Status: ${res.status}"
+                    echo "🔄 n8n is now processing the data to generate HTML report..."
                     
                 } catch (Exception e) {
-                    echo "❌ Failed to get HTML from n8n: ${e.getMessage()}"
+                    echo "❌ Failed to send data to n8n: ${e.getMessage()}"
                     if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
                         echo "Note: SSL certificate issue with self-signed certificates"
                     }
@@ -244,7 +238,77 @@ pipeline {
             }
         }
 
-
+        stage('Wait for n8n HTML Report') {
+            steps {
+                script {
+                    echo "⏳ Waiting for n8n to generate and provide HTML report..."
+                    
+                    def maxWaitTime = 300 // 5 minutes
+                    def waitInterval = 15 // Check every 15 seconds
+                    def totalWaitTime = 0
+                    def reportReceived = false
+                    def buildNumber = env.BUILD_NUMBER
+                    
+                    // You'll need to configure n8n to provide a status endpoint or file drop location
+                    def reportUrl = params.N8N_WEBHOOK_URL.replace('/webhook/', '/report/') + "?buildNumber=${buildNumber}"
+                    def outFile = "reports/report-build-${buildNumber}.html"
+                    
+                    sh 'mkdir -p reports'
+                    
+                    while (totalWaitTime < maxWaitTime && !reportReceived) {
+                        try {
+                            echo "🔍 Checking for report... (${totalWaitTime}s/${maxWaitTime}s)"
+                            
+                            // Try to get the HTML report from n8n
+                            def reportRes = httpRequest(
+                                httpMode: 'GET',
+                                url: reportUrl,
+                                timeout: 30,
+                                ignoreSslErrors: true,
+                                validResponseCodes: '200,404',
+                                outputFile: outFile
+                            )
+                            
+                            if (reportRes.status == 200) {
+                                // Check if we got actual HTML content (not just JSON)
+                                def fileContent = readFile(outFile)
+                                if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
+                                    reportReceived = true
+                                    echo "✅ HTML report received! Size: ${fileContent.length()} characters"
+                                    
+                                    // Archive the HTML report
+                                    archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
+                                    echo "📁 Report archived as Jenkins artifact: ${outFile}"
+                                } else {
+                                    echo "⚠️ Received response but not HTML content yet..."
+                                }
+                            } else {
+                                echo "📋 Report not ready yet (HTTP ${reportRes.status})"
+                            }
+                            
+                        } catch (Exception e) {
+                            if (e.getMessage().contains('404')) {
+                                echo "⏱️ Report not ready yet..."
+                            } else {
+                                echo "⚠️ Error checking for report: ${e.getMessage()}"
+                            }
+                        }
+                        
+                        if (!reportReceived) {
+                            sleep(waitInterval)
+                            totalWaitTime += waitInterval
+                        }
+                    }
+                    
+                    if (!reportReceived) {
+                        echo "⚠️ Timeout: HTML report was not received after ${maxWaitTime} seconds"
+                        echo "💡 n8n might still be processing - check manually later"
+                    }
+                    
+                    echo "🏁 Pipeline completed!"
+                }
+            }
+        }
     }
 }
 
