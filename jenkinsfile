@@ -182,22 +182,24 @@ pipeline {
                     checkmarxReport: checkmarxReport
                 ]
 
-                // Send data to n8n and get HTML report directly in response
+                // Send data to n8n and get HTML report in response
+                def buildNumber = env.BUILD_NUMBER
+                def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
+                def outFile = "reports/${expectedFileName}"
+                
                 try {
-                    def buildNumber = env.BUILD_NUMBER
-                    def outFile = "reports/Report-jenkins-checkmarx-test-build-${buildNumber}.html"
+                    echo "� Sending data to n8n and waiting for HTML report response..."
                     
-                    echo "📤 Sending data to n8n and waiting for HTML response..."
-                    
+                    // Send request and save response directly to file
                     def res = httpRequest(
                         httpMode: 'POST',
                         url: params.N8N_WEBHOOK_URL,
                         contentType: 'APPLICATION_JSON',
                         requestBody: groovy.json.JsonOutput.toJson(payload),
-                        timeout: 120, // Increased timeout for processing
+                        timeout: 300,  // 5 minutes timeout for n8n to process and respond
                         ignoreSslErrors: true,
                         validResponseCodes: '200:299',
-                        outputFile: outFile // Save response directly to file
+                        outputFile: outFile  // Save response directly to file
                     )
                     
                     echo "✅ Response received from n8n - Status: ${res.status}"
@@ -205,28 +207,26 @@ pipeline {
                     // Check if we got valid HTML content
                     def fileContent = readFile(outFile)
                     
-                    if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE') || fileContent.contains('<HTML')) {
+                    if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
                         echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
                         
                         // Archive the HTML report
                         archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
-                        echo "📁 HTML report archived as Jenkins artifact: ${outFile}"
-                        
-                    } else if (fileContent.contains('"status"') || fileContent.contains('"message"')) {
-                        // Probably JSON response, not HTML
-                        echo "⚠️ Received JSON response instead of HTML:"
-                        echo fileContent.take(500) // Show first 500 characters
-                        echo "💡 Check if n8n 'Respond to Webhook' node is returning HTML content directly"
+                        echo "📁 Report archived as Jenkins artifact: ${outFile}"
+                        echo "🎉 HTML report successfully received and archived!"
                         
                     } else {
-                        echo "⚠️ Received response but doesn't appear to be valid HTML:"
-                        echo fileContent.take(200) // Show first 200 characters
+                        echo "⚠️ Response received but doesn't contain valid HTML"
+                        echo "� Response preview (first 500 chars):"
+                        echo fileContent.take(500)
                     }
                     
                 } catch (Exception e) {
-                    echo "❌ Failed to send data to n8n: ${e.getMessage()}"
+                    echo "❌ Failed to get HTML from n8n: ${e.getMessage()}"
                     if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
                         echo "Note: SSL certificate issue with self-signed certificates"
+                    } else if (e.getMessage().contains('timeout')) {
+                        echo "Note: n8n took too long to generate the report (> 5 minutes)"
                     }
                 }
                 
