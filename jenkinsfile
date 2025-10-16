@@ -182,85 +182,45 @@ pipeline {
                     checkmarxReport: checkmarxReport
                 ]
 
-                // Send data to n8n and wait for HTML report
+                // Send data to n8n and get HTML report directly in response
                 try {
+                    def buildNumber = env.BUILD_NUMBER
+                    def outFile = "reports/Report-jenkins-checkmarx-test-build-${buildNumber}.html"
+                    
+                    echo "📤 Sending data to n8n and waiting for HTML response..."
+                    
                     def res = httpRequest(
                         httpMode: 'POST',
                         url: params.N8N_WEBHOOK_URL,
                         contentType: 'APPLICATION_JSON',
                         requestBody: groovy.json.JsonOutput.toJson(payload),
-                        timeout: 30,
+                        timeout: 120, // Increased timeout for processing
                         ignoreSslErrors: true,
-                        validResponseCodes: '200:299'
+                        validResponseCodes: '200:299',
+                        outputFile: outFile // Save response directly to file
                     )
-                    echo "✅ Data sent to n8n successfully - Status: ${res.status}"
-                    echo "🔄 n8n is now processing the data to generate HTML report..."
                     
-                    // Wait for n8n to generate and provide HTML report
-                    echo "⏳ Waiting for n8n to generate HTML report..."
+                    echo "✅ Response received from n8n - Status: ${res.status}"
                     
-                    def maxWaitTime = 300 // 5 minutes
-                    def waitInterval = 15 // Check every 15 seconds
-                    def totalWaitTime = 0
-                    def reportReceived = false
-                    def buildNumber = env.BUILD_NUMBER
+                    // Check if we got valid HTML content
+                    def fileContent = readFile(outFile)
                     
-                    // Expected filename pattern from n8n
-                    def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
-                    def outFile = "reports/${expectedFileName}"
-                    
-                    while (totalWaitTime < maxWaitTime && !reportReceived) {
-                        echo "🔍 Looking for file: ${expectedFileName} (${totalWaitTime}s/${maxWaitTime}s)"
+                    if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE') || fileContent.contains('<HTML')) {
+                        echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
                         
-                        // Debug: List files matching 'Report*'
-                        sh "ls -la Report* 2>/dev/null || echo 'No Report* files found yet'"
+                        // Archive the HTML report
+                        archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
+                        echo "📁 HTML report archived as Jenkins artifact: ${outFile}"
                         
-                        // Check if the file exists in current workspace
-                        def fileExists = sh(
-                            script: "test -f '${expectedFileName}' && echo 'true' || echo 'false'",
-                            returnStdout: true
-                        ).trim()
+                    } else if (fileContent.contains('"status"') || fileContent.contains('"message"')) {
+                        // Probably JSON response, not HTML
+                        echo "⚠️ Received JSON response instead of HTML:"
+                        echo fileContent.take(500) // Show first 500 characters
+                        echo "💡 Check if n8n 'Respond to Webhook' node is returning HTML content directly"
                         
-                        if (fileExists == 'true') {
-                            echo "✅ Found HTML report file: ${expectedFileName}"
-                            
-                            try {
-                                // Move file to reports directory and check content
-                                sh "cp '${expectedFileName}' '${outFile}'"
-                                def fileContent = readFile(outFile)
-                                
-                                if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
-                                    reportReceived = true
-                                    echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
-                                    
-                                    // Archive the HTML report
-                                    archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
-                                    echo "📁 Report archived as Jenkins artifact: ${outFile}"
-                                    
-                                    // Clean up original file
-                                    sh "rm -f '${expectedFileName}'"
-                                } else {
-                                    echo "⚠️ File found but doesn't contain valid HTML content yet..."
-                                    sh "rm -f '${outFile}'" // Remove invalid file
-                                }
-                            } catch (Exception e) {
-                                echo "⚠️ Error processing found file: ${e.getMessage()}"
-                            }
-                        } else {
-                            echo "⏱️ File not found in workspace yet..."
-                        }
-                        
-                        if (!reportReceived) {
-                            sleep(waitInterval)
-                            totalWaitTime += waitInterval
-                        }
-                    }
-                    
-                    if (!reportReceived) {
-                        echo "⚠️ Timeout: HTML report was not received after ${maxWaitTime} seconds"
-                        echo "💡 n8n might still be processing - check manually later"
                     } else {
-                        echo "🎉 HTML report successfully received and archived!"
+                        echo "⚠️ Received response but doesn't appear to be valid HTML:"
+                        echo fileContent.take(200) // Show first 200 characters
                     }
                     
                 } catch (Exception e) {
