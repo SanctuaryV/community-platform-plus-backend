@@ -250,7 +250,7 @@ pipeline {
                     def buildNumber = env.BUILD_NUMBER
                     
                     // Expected filename pattern from n8n
-                    def expectedFileName = "Report jenkins-checkmarx-test-build-${buildNumber}.html"
+                    def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
                     def outFile = "reports/${expectedFileName}"
                     
                     sh 'mkdir -p reports'
