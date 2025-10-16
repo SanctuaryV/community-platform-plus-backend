@@ -198,7 +198,7 @@ pipeline {
                         requestBody: groovy.json.JsonOutput.toJson(payload),
                         timeout: 300,  // 5 minutes timeout for n8n to process and respond
                         ignoreSslErrors: true,
-                        validResponseCodes: '844',
+                        validResponseCodes: '200:299',
                         outputFile: outFile  // Save response directly to file
                     )
                     
