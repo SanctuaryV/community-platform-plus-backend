@@ -104,7 +104,8 @@ pipeline {
         stage('Send to n8n & Download HTML back') {
             steps {
                 script {
-                    sh 'mkdir -p reports'
+                    // Create reports directory (no special permissions needed)
+                    sh 'mkdir reports 2>/dev/null || true'
                     
                     def jobResult = currentBuild.result ?: 'SUCCESS'
                     def failedStage = 'None'
