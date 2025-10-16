@@ -101,19 +101,21 @@ pipeline {
             }
         }
 
-        stage('Send Data to n8n & Datadog') {
+        stage('Send to n8n & Download HTML back') {
             steps {
                 script {
+                    sh 'mkdir -p reports'
+                    
                     def jobResult = currentBuild.result ?: 'SUCCESS'
-                def failedStage = 'None'
-                
-                if (jobResult != 'SUCCESS') {
-                    failedStage = env.STAGE_NAME ?: 'Unknown Stage'
-                }
+                    def failedStage = 'None'
+                    
+                    if (jobResult != 'SUCCESS') {
+                        failedStage = env.STAGE_NAME ?: 'Unknown Stage'
+                    }
 
-                def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
-                def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                dateFormat.setTimeZone(bangkokTimeZone)
+                    def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
+                    def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+                    dateFormat.setTimeZone(bangkokTimeZone)
                 
                 def checkmarxReport = null
                 if (params.Run_Checkmarx) {
@@ -176,22 +178,28 @@ pipeline {
                     checkmarxReport: checkmarxReport
                 ]
 
-                // Send to n8n webhook
+                // Send to n8n and get HTML file back
+                def outFile = "reports/report-build-${env.BUILD_NUMBER}.html"
+                
                 try {
-                    httpRequest(
+                    def res = httpRequest(
                         httpMode: 'POST',
                         url: params.N8N_WEBHOOK_URL,
                         contentType: 'APPLICATION_JSON',
                         requestBody: groovy.json.JsonOutput.toJson(payload),
-                        timeout: 30,
+                        timeout: 120,
                         ignoreSslErrors: true,
-                        acceptType: 'APPLICATION_JSON',
                         validResponseCodes: '200:299',
-                        quiet: false
+                        outputFile: outFile
                     )
-                    echo "✅ Webhook sent to n8n successfully"
+                    echo "✅ n8n response status: ${res.status}"
+                    echo "✅ HTML report saved to: ${outFile}"
+                    
+                    // Archive the HTML report
+                    archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
+                    
                 } catch (Exception e) {
-                    echo "❌ Failed to send webhook to n8n: ${e.getMessage()}"
+                    echo "❌ Failed to get HTML from n8n: ${e.getMessage()}"
                     if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
                         echo "Note: SSL certificate issue with self-signed certificates"
                     }
@@ -236,52 +244,7 @@ pipeline {
             }
         }
 
-        stage('Wait for n8n Response') {
-            steps {
-                script {
-                    echo "⏳ Waiting for n8n to process data and send file back..."
-                    
-                    def maxWaitTime = 300 // 5 minutes in seconds
-                    def waitInterval = 10 // Check every 10 seconds
-                    def totalWaitTime = 0
-                    def fileReceived = false
-                    def expectedFileName = "n8n-response-${env.BUILD_NUMBER}.json"
-                    
-                    while (totalWaitTime < maxWaitTime && !fileReceived) {
-                        // Check if file exists (you may need to adjust the path where n8n sends the file)
-                        def fileExists = sh(
-                            script: "test -f '${expectedFileName}' && echo 'true' || echo 'false'",
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (fileExists == 'true') {
-                            fileReceived = true
-                            echo "✅ File received from n8n: ${expectedFileName}"
-                            
-                            // Read and display the file content
-                            def responseContent = readFile(expectedFileName)
-                            echo "📄 n8n Response Content:"
-                            echo responseContent
-                            
-                            // Archive the response file
-                            archiveArtifacts artifacts: expectedFileName, fingerprint: true
-                            
-                        } else {
-                            echo "⏱️ Still waiting... (${totalWaitTime}s/${maxWaitTime}s)"
-                            sleep(waitInterval)
-                            totalWaitTime += waitInterval
-                        }
-                    }
-                    
-                    if (!fileReceived) {
-                        echo "⚠️ Timeout: No response file received from n8n after ${maxWaitTime} seconds"
-                        echo "📝 Pipeline will continue anyway..."
-                    }
-                    
-                    echo "🏁 Pipeline processing complete!"
-                }
-            }
-        }
+
     }
 }
 
