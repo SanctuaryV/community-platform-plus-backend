@@ -43,19 +43,6 @@ pipeline {
                     try {
                         echo "🔍 Running Checkmarx scan..."
                         
-                        // Run Checkmarx scan and capture output using shell script
-                        def scanOutput = sh(script: '''
-                            # Create a temporary log file
-                            LOG_FILE=$(mktemp)
-                            
-                            # Note: The checkmarxASTScanner step output will appear in Jenkins console
-                            # We'll parse it after the scan completes
-                            echo "SCAN_LOG_READY"
-                            
-                            # Return success
-                            exit 0
-                        ''', returnStdout: true).trim()
-                        
                         // Run Checkmarx scan with custom output path
                         checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format sarif --output-name checkmarx --output-path reports',
                             baseAuthUrl: '',
@@ -66,99 +53,6 @@ pipeline {
                             serverUrl: '',
                             tenantName: '',
                             useOwnAdditionalOptions: true
-                        
-                        echo "📊 Extracting Checkmarx scan summary from JSON report..."
-                        
-                        // Try to parse the summary JSON report that Checkmarx creates
-                        def scanSummary = [:]
-                        def vulnerabilities = [
-                            SAST: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
-                            SCA: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
-                            IAC: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
-                            CONTAINERS: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
-                            SCS: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
-                            APIs: [critical: 0, high: 0, medium: 0, low: 0, info: 0]
-                        ]
-                        
-                        // Try to read the JSON summary file created by Checkmarx
-                        try {
-                            def jsonFiles = sh(script: 'find . -name "checkmarx-ast-results.json" 2>/dev/null || echo ""', returnStdout: true).trim()
-                            if (jsonFiles) {
-                                def jsonFile = jsonFiles.split('\n')[0]
-                                def jsonContent = readFile(jsonFile)
-                                def jsonData = new groovy.json.JsonSlurperClassic().parseText(jsonContent)
-                                
-                                // Parse the JSON structure
-                                if (jsonData.ScanSummary) {
-                                    scanSummary.scanId = jsonData.ScanSummary.ScanID ?: 'Unknown'
-                                    scanSummary.projectName = jsonData.ScanSummary.ProjectName ?: 'Unknown'
-                                    scanSummary.createdAt = jsonData.ScanSummary.CreatedAt ?: 'Unknown'
-                                    scanSummary.riskLevel = jsonData.ScanSummary.RiskLevel ?: 'Unknown'
-                                    
-                                    // Parse totals
-                                    if (jsonData.ScanSummary.ResultsSummary?.Total) {
-                                        scanSummary.totalCritical = jsonData.ScanSummary.ResultsSummary.Total.Critical ?: 0
-                                        scanSummary.totalHigh = jsonData.ScanSummary.ResultsSummary.Total.High ?: 0
-                                        scanSummary.totalMedium = jsonData.ScanSummary.ResultsSummary.Total.Medium ?: 0
-                                        scanSummary.totalLow = jsonData.ScanSummary.ResultsSummary.Total.Low ?: 0
-                                        scanSummary.totalInfo = jsonData.ScanSummary.ResultsSummary.Total.Info ?: 0
-                                    }
-                                    
-                                    // Parse by scan type
-                                    ['SAST', 'SCA', 'IAC', 'CONTAINERS', 'SCS', 'APIs'].each { scanType ->
-                                        if (jsonData.ScanSummary.ResultsSummary?."${scanType}") {
-                                            def typeData = jsonData.ScanSummary.ResultsSummary."${scanType}"
-                                            vulnerabilities[scanType] = [
-                                                critical: typeData.Critical ?: 0,
-                                                high: typeData.High ?: 0,
-                                                medium: typeData.Medium ?: 0,
-                                                low: typeData.Low ?: 0,
-                                                info: typeData.Info ?: 0
-                                            ]
-                                        }
-                                    }
-                                }
-                                
-                                echo "✅ Successfully parsed JSON summary report"
-                            } else {
-                                echo "⚠️ JSON summary report not found, will use manual values"
-                                // Set manual values based on typical scan results
-                                scanSummary = [
-                                    scanId: 'See Jenkins Console',
-                                    projectName: 'SanctuaryV/community-platform-plus-backend',
-                                    createdAt: new Date().format("yyyy-MM-dd, HH:mm:ss"),
-                                    riskLevel: 'See Jenkins Console',
-                                    totalCritical: 0,
-                                    totalHigh: 6,
-                                    totalMedium: 1,
-                                    totalLow: 46,
-                                    totalInfo: 0
-                                ]
-                                vulnerabilities.SAST = [critical: 0, high: 0, medium: 1, low: 43, info: 0]
-                                vulnerabilities.SCA = [critical: 0, high: 6, medium: 0, low: 3, info: 0]
-                            }
-                        } catch (Exception jsonEx) {
-                            echo "⚠️ Could not parse JSON report: ${jsonEx.getMessage()}"
-                            echo "   Using placeholder values - check Jenkins console for actual results"
-                            scanSummary = [
-                                scanId: 'See Jenkins Console',
-                                projectName: 'SanctuaryV/community-platform-plus-backend',
-                                createdAt: new Date().format("yyyy-MM-dd, HH:mm:ss"),
-                                riskLevel: 'See Jenkins Console'
-                            ]
-                        }
-                        
-                        scanSummary.vulnerabilities = vulnerabilities
-                        env.CHECKMARX_SCAN_SUMMARY = groovy.json.JsonOutput.toJson(scanSummary)
-                        
-                        echo "✅ Checkmarx Scan Summary:"
-                        echo "   Project: ${scanSummary.projectName ?: 'Unknown'}"
-                        echo "   Scan ID: ${scanSummary.scanId ?: 'Unknown'}"
-                        echo "   Created At: ${scanSummary.createdAt ?: 'Unknown'}"
-                        echo "   Risk Level: ${scanSummary.riskLevel ?: 'Unknown'}"
-                        echo "   Total Vulnerabilities - Critical: ${scanSummary.totalCritical ?: 0}, High: ${scanSummary.totalHigh ?: 0}, Medium: ${scanSummary.totalMedium ?: 0}, Low: ${scanSummary.totalLow ?: 0}"
-                        echo "   SAST - Critical: ${vulnerabilities.SAST.critical}, High: ${vulnerabilities.SAST.high}, Medium: ${vulnerabilities.SAST.medium}, Low: ${vulnerabilities.SAST.low}"
-                        echo "   SCA - Critical: ${vulnerabilities.SCA.critical}, High: ${vulnerabilities.SCA.high}, Medium: ${vulnerabilities.SCA.medium}, Low: ${vulnerabilities.SCA.low}"
                         
                         echo "📋 Capturing Checkmarx SARIF report..."
                         
@@ -207,45 +101,31 @@ pipeline {
             }
         }
 
-        stage('Send to n8n & Download HTML back') {
+        stage('Send to n8n & Datadog') {
             steps {
                 script {
-                    // Create reports directory with proper permissions
                     sh '''
-                        mkdir reports 2>/dev/null || true
-                        chmod 755 reports 2>/dev/null || true
+                        mkdir -p reports
+                        chmod 755 reports
                     '''
                     
                     def jobResult = currentBuild.result ?: 'SUCCESS'
-                    def failedStage = 'None'
-                    
-                    if (jobResult != 'SUCCESS') {
-                        failedStage = env.STAGE_NAME ?: 'Unknown Stage'
-                    }
+                    def failedStage = jobResult != 'SUCCESS' ? (env.STAGE_NAME ?: 'Unknown Stage') : 'None'
 
                     def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
                     def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                     dateFormat.setTimeZone(bangkokTimeZone)
-                    
+                
                     def checkmarxReport = null
-                    def checkmarxScanSummary = null
-                    
                     if (params.Run_Checkmarx) {
                         echo "🔍 Processing Checkmarx SARIF report..."
                         
                         try {
-                            // Parse scan summary from environment variable
-                            if (env.CHECKMARX_SCAN_SUMMARY) {
-                                checkmarxScanSummary = new groovy.json.JsonSlurperClassic().parseText(env.CHECKMARX_SCAN_SUMMARY)
-                                echo "✅ Scan summary parsed successfully"
-                            }
-                            
                             if (env.CHECKMARX_SARIF_REPORT && env.CHECKMARX_SARIF_REPORT != 'null') {
-                                // Send raw SARIF content without parsing to avoid readJSON dependency
                                 checkmarxReport = [
                                     format: 'sarif',
                                     content: env.CHECKMARX_SARIF_REPORT,
-                                    summary: checkmarxScanSummary ?: 'Checkmarx AST scan results in SARIF format',
+                                    summary: 'Checkmarx AST scan results in SARIF format',
                                     filePath: 'reports/checkmarx.sarif',
                                     fileSize: env.CHECKMARX_SARIF_REPORT.length(),
                                     captureMethod: 'file_content'
@@ -255,7 +135,7 @@ pipeline {
                                 checkmarxReport = [
                                     format: 'error',
                                     content: null,
-                                    summary: checkmarxScanSummary ?: 'SARIF report was not captured - file may not exist',
+                                    summary: 'SARIF report was not captured - file may not exist',
                                     captureMethod: 'failed'
                                 ]
                                 echo "❌ No SARIF report was captured"
@@ -264,7 +144,7 @@ pipeline {
                             checkmarxReport = [
                                 format: 'error',
                                 content: null,
-                                summary: checkmarxScanSummary ?: ('Error processing SARIF report: ' + e.getMessage()),
+                                summary: 'Error processing SARIF report: ' + e.getMessage(),
                                 exception: e.getClass().getSimpleName()
                             ]
                             echo "❌ Error processing SARIF report: ${e.getMessage()}"
@@ -293,49 +173,42 @@ pipeline {
                             imageName: params.IMAGE_NAME_BACKEND,
                             runCheckmarx: params.Run_Checkmarx
                         ],
-                        checkmarxReport: checkmarxReport,
-                        checkmarxScanSummary: checkmarxScanSummary
+                        checkmarxReport: checkmarxReport
                     ]
 
-                    // Send data to n8n and get HTML report in response
                     def buildNumber = env.BUILD_NUMBER
                     def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
                     def outFile = "reports/${expectedFileName}"
                     
                     try {
                         echo "📤 Sending data to n8n and waiting for HTML report response..."
-                    
-                    // Send request and save response directly to file
-                    def res = httpRequest(
-                        httpMode: 'POST',
-                        url: params.N8N_WEBHOOK_URL,
-                        contentType: 'APPLICATION_JSON',
-                        requestBody: groovy.json.JsonOutput.toJson(payload),
-                        timeout: 300,  // 5 minutes timeout for n8n to process and respond
-                        ignoreSslErrors: true,
-                        validResponseCodes: '200:299',
-                        outputFile: outFile  // Save response directly to file
-                    )
-                    
-                    echo "✅ Response received from n8n - Status: ${res.status}"
-                    
-                    // Check if we got valid HTML content
-                    def fileContent = readFile(outFile)
-                    
-                    if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
-                        echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
                         
-                        // Archive the HTML report
-                        archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
-                        echo "📁 Report archived as Jenkins artifact: ${outFile}"
-                        echo "🎉 HTML report successfully received and archived!"
+                        def res = httpRequest(
+                            httpMode: 'POST',
+                            url: params.N8N_WEBHOOK_URL,
+                            contentType: 'APPLICATION_JSON',
+                            requestBody: groovy.json.JsonOutput.toJson(payload),
+                            timeout: 300,
+                            ignoreSslErrors: true,
+                            validResponseCodes: '200:299',
+                            outputFile: outFile
+                        )
                         
-                    } else {
-                        echo "⚠️ Response received but doesn't contain valid HTML"
-                        echo "� Response preview (first 500 chars):"
-                        echo fileContent.take(500)
-                    }
-                    
+                        echo "✅ Response received from n8n - Status: ${res.status}"
+                        
+                        def fileContent = readFile(outFile)
+                        
+                        if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
+                            echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
+                            archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
+                            echo "📁 Report archived as Jenkins artifact: ${outFile}"
+                            echo "🎉 HTML report successfully received and archived!"
+                        } else {
+                            echo "⚠️ Response received but doesn't contain valid HTML"
+                            echo "📄 Response preview (first 500 chars):"
+                            echo fileContent.take(500)
+                        }
+                        
                     } catch (Exception e) {
                         echo "❌ Failed to get HTML from n8n: ${e.getMessage()}"
                         if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
@@ -345,69 +218,39 @@ pipeline {
                         }
                     }
                     
-                    // Send data to Datadog
-                    try {
-                        def triggeredBy = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System'
-                        def buildDurationSeconds = (currentBuild.duration ?: 0) / 1000.0
-                        def statusValue = jobResult == 'SUCCESS' ? 1 : 0
+                    // try {
+                    //     echo "📊 Sending metrics to Datadog..."
                         
-                        def tags = [
-                            "job_name:${env.JOB_NAME}",
-                            "branch:${params.REPO_BRANCH}",
-                            "result:${jobResult.toLowerCase()}",
-                            "user:${triggeredBy}",
-                            "env:production",
-                            "service:community-platform-backend"
-                        ]
+                    //     def triggeredBy = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System'
+                    //     def buildDurationSeconds = (currentBuild.duration ?: 0) / 1000.0
+                    //     def statusValue = jobResult == 'SUCCESS' ? 1 : 0
                         
-                        // Send data to Datadog using plugin
-                        datadog(collectLogs: true, tags: tags) {
-                            // Log structured data for Datadog to collect
-                            echo "DATADOG_METRIC: jenkins.job.duration=${buildDurationSeconds} type=gauge"
-                            echo "DATADOG_METRIC: jenkins.job.status=${statusValue} type=gauge" 
-                            echo "DATADOG_METRIC: jenkins.job.completed=1 type=count"
+                    //     def tags = [
+                    //         "job_name:${env.JOB_NAME}",
+                    //         "branch:${params.REPO_BRANCH}",
+                    //         "result:${jobResult.toLowerCase()}",
+                    //         "user:${triggeredBy}",
+                    //         "env:production",
+                    //         "service:community-platform-backend"
+                    //     ]
+                        
+                    //     datadog(collectLogs: true, tags: tags) {
+                    //         echo "DATADOG_METRIC: jenkins.job.duration=${buildDurationSeconds} type=gauge"
+                    //         echo "DATADOG_METRIC: jenkins.job.status=${statusValue} type=gauge" 
+                    //         echo "DATADOG_METRIC: jenkins.job.completed=1 type=count"
+                    //         echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
+                    //         echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
                             
-                            // Send standard logs
-                            echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
-                            echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
-                            
-                            if (params.Run_Checkmarx && checkmarxScanSummary) {
-                                echo "Checkmarx scan completed - Risk Level: ${checkmarxScanSummary.riskLevel ?: 'Unknown'}"
-                                echo "Vulnerabilities - Critical: ${checkmarxScanSummary.totalCritical ?: 0}, High: ${checkmarxScanSummary.totalHigh ?: 0}, Medium: ${checkmarxScanSummary.totalMedium ?: 0}, Low: ${checkmarxScanSummary.totalLow ?: 0}"
-                                
-                                // Send Checkmarx metrics to Datadog
-                                echo "DATADOG_METRIC: jenkins.checkmarx.critical=${checkmarxScanSummary.totalCritical ?: 0} type=gauge scan_type=checkmarx"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.high=${checkmarxScanSummary.totalHigh ?: 0} type=gauge scan_type=checkmarx"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.medium=${checkmarxScanSummary.totalMedium ?: 0} type=gauge scan_type=checkmarx"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.low=${checkmarxScanSummary.totalLow ?: 0} type=gauge scan_type=checkmarx"
-                                
-                                // Send SAST metrics
-                                if (checkmarxScanSummary.vulnerabilities?.SAST) {
-                                    def sast = checkmarxScanSummary.vulnerabilities.SAST
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.critical=${sast.critical ?: 0} type=gauge scan_type=sast"
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.high=${sast.high ?: 0} type=gauge scan_type=sast"
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.medium=${sast.medium ?: 0} type=gauge scan_type=sast"
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.low=${sast.low ?: 0} type=gauge scan_type=sast"
-                                }
-                                
-                                // Send SCA metrics
-                                if (checkmarxScanSummary.vulnerabilities?.SCA) {
-                                    def sca = checkmarxScanSummary.vulnerabilities.SCA
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.critical=${sca.critical ?: 0} type=gauge scan_type=sca"
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.high=${sca.high ?: 0} type=gauge scan_type=sca"
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.medium=${sca.medium ?: 0} type=gauge scan_type=sca"
-                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.low=${sca.low ?: 0} type=gauge scan_type=sca"
-                                }
-                            }
-                            
-                            if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
-                                echo "DATADOG_METRIC: jenkins.checkmarx.report_size=${checkmarxReport.fileSize} type=gauge scan_type=checkmarx"
-                            }
-                        }
-                        echo "✅ Data sent to Datadog successfully"
-                    } catch (Exception e) {
-                        echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
-                    }
+                    //         if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
+                    //             echo "Checkmarx scan completed - Report size: ${checkmarxReport.fileSize} characters"
+                    //             echo "DATADOG_METRIC: jenkins.checkmarx.report_size=${checkmarxReport.fileSize} type=gauge"
+                    //         }
+                    //     }
+                        
+                    //     echo "✅ Data sent to Datadog successfully"
+                    // } catch (Exception e) {
+                    //     echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
+                    // }
                 }
             }
         }
