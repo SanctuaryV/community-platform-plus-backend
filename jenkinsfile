@@ -5,7 +5,7 @@ pipeline {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
         string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
-        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Test Webhook URL')
+        choice(name: 'AI_MODEL', choices: ['gemini', 'gpt'], description: 'Select AI model for report generation')
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
     }
 
@@ -251,7 +251,8 @@ pipeline {
                         buildUrl: env.BUILD_URL,
                         parameters: [
                             imageName: params.IMAGE_NAME_BACKEND,
-                            runCheckmarx: params.Run_Checkmarx
+                            runCheckmarx: params.Run_Checkmarx,
+                            aiModel: params.AI_MODEL
                         ],
                         checkmarxReport: checkmarxReport,
                         jenkinsLogs: jenkinsLogs
@@ -261,12 +262,22 @@ pipeline {
                     def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
                     def outFile = "reports/${expectedFileName}"
                     
+                    // Select webhook URL based on AI model choice
+                    def webhookUrl = ''
+                    if (params.AI_MODEL == 'gpt') {
+                        webhookUrl = 'https://35.247.160.122:5678/webhook/198e19f9-60aa-463f-b5dd-bc5e88285928'
+                        echo "🤖 Using GPT model for report generation"
+                    } else {
+                        webhookUrl = 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313'
+                        echo "🤖 Using Gemini model for report generation"
+                    }
+                    
                     try {
                         echo "📤 Sending data to n8n and waiting for HTML report response..."
                         
                         def res = httpRequest(
                             httpMode: 'POST',
-                            url: params.N8N_WEBHOOK_URL,
+                            url: webhookUrl,
                             contentType: 'APPLICATION_JSON',
                             requestBody: groovy.json.JsonOutput.toJson(payload),
                             timeout: 300,
