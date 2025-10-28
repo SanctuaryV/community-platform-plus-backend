@@ -43,6 +43,9 @@ pipeline {
                     try {
                         echo "🔍 Running Checkmarx scan..."
                         
+                        // Capture the console output during the scan
+                        def logContent = ""
+                        
                         // Run Checkmarx scan with custom output path
                         checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format sarif --output-name checkmarx --output-path reports',
                             baseAuthUrl: '',
@@ -53,6 +56,91 @@ pipeline {
                             serverUrl: '',
                             tenantName: '',
                             useOwnAdditionalOptions: true
+                        
+                        // Get the console log to parse scan summary
+                        echo "📊 Parsing Checkmarx scan summary from console output..."
+                        logContent = currentBuild.rawBuild.getLog(1000).join('\n')
+                        
+                        // Parse scan summary from console output
+                        def scanSummary = [:]
+                        def vulnerabilities = [
+                            SAST: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
+                            SCA: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
+                            IAC: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
+                            CONTAINERS: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
+                            SCS: [critical: 0, high: 0, medium: 0, low: 0, info: 0],
+                            APIs: [critical: 0, high: 0, medium: 0, low: 0, info: 0]
+                        ]
+                        
+                        // Parse the output for vulnerability data
+                        logContent.eachLine { line ->
+                            // Look for lines like: | SAST 0 0 1 43 0 Completed |
+                            def matcher = line =~ /\|\s*(SAST|SCA|IAC|CONTAINERS|SCS|APIs)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+.*\|/
+                            if (matcher.find()) {
+                                def scanType = matcher.group(1)
+                                vulnerabilities[scanType] = [
+                                    critical: matcher.group(2).toInteger(),
+                                    high: matcher.group(3).toInteger(),
+                                    medium: matcher.group(4).toInteger(),
+                                    low: matcher.group(5).toInteger(),
+                                    info: matcher.group(6).toInteger()
+                                ]
+                            }
+                            
+                            // Parse total line: | TOTAL 0 6 1 46 0 Completed |
+                            def totalMatcher = line =~ /\|\s*TOTAL\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+.*\|/
+                            if (totalMatcher.find()) {
+                                scanSummary.totalCritical = totalMatcher.group(1).toInteger()
+                                scanSummary.totalHigh = totalMatcher.group(2).toInteger()
+                                scanSummary.totalMedium = totalMatcher.group(3).toInteger()
+                                scanSummary.totalLow = totalMatcher.group(4).toInteger()
+                                scanSummary.totalInfo = totalMatcher.group(5).toInteger()
+                            }
+                            
+                            // Parse Scan ID
+                            if (line.contains('Scan ID:')) {
+                                def scanIdMatcher = line =~ /Scan ID:\s*([a-f0-9-]+)/
+                                if (scanIdMatcher.find()) {
+                                    scanSummary.scanId = scanIdMatcher.group(1)
+                                }
+                            }
+                            
+                            // Parse Created At timestamp
+                            if (line.contains('Created At:')) {
+                                def dateMatcher = line =~ /Created At:\s*([\d-]+,\s*[\d:]+)/
+                                if (dateMatcher.find()) {
+                                    scanSummary.createdAt = dateMatcher.group(1)
+                                }
+                            }
+                            
+                            // Parse Project Name
+                            if (line.contains('Project Name:')) {
+                                def projectMatcher = line =~ /Project Name:\s*(.+)/
+                                if (projectMatcher.find()) {
+                                    scanSummary.projectName = projectMatcher.group(1).trim()
+                                }
+                            }
+                            
+                            // Parse Risk Level
+                            if (line.contains('Risk Level:')) {
+                                def riskMatcher = line =~ /Risk Level:\s*(\w+\s*\w*)/
+                                if (riskMatcher.find()) {
+                                    scanSummary.riskLevel = riskMatcher.group(1).trim()
+                                }
+                            }
+                        }
+                        
+                        scanSummary.vulnerabilities = vulnerabilities
+                        env.CHECKMARX_SCAN_SUMMARY = groovy.json.JsonOutput.toJson(scanSummary)
+                        
+                        echo "✅ Parsed Checkmarx Scan Summary:"
+                        echo "   Project: ${scanSummary.projectName ?: 'Unknown'}"
+                        echo "   Scan ID: ${scanSummary.scanId ?: 'Unknown'}"
+                        echo "   Created At: ${scanSummary.createdAt ?: 'Unknown'}"
+                        echo "   Risk Level: ${scanSummary.riskLevel ?: 'Unknown'}"
+                        echo "   Total Vulnerabilities - Critical: ${scanSummary.totalCritical ?: 0}, High: ${scanSummary.totalHigh ?: 0}, Medium: ${scanSummary.totalMedium ?: 0}, Low: ${scanSummary.totalLow ?: 0}"
+                        echo "   SAST - Critical: ${vulnerabilities.SAST.critical}, High: ${vulnerabilities.SAST.high}, Medium: ${vulnerabilities.SAST.medium}, Low: ${vulnerabilities.SAST.low}"
+                        echo "   SCA - Critical: ${vulnerabilities.SCA.critical}, High: ${vulnerabilities.SCA.high}, Medium: ${vulnerabilities.SCA.medium}, Low: ${vulnerabilities.SCA.low}"
                         
                         echo "📋 Capturing Checkmarx SARIF report..."
                         
@@ -120,67 +208,76 @@ pipeline {
                     def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
                     def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                     dateFormat.setTimeZone(bangkokTimeZone)
-                
-                def checkmarxReport = null
-                if (params.Run_Checkmarx) {
-                    echo "🔍 Processing Checkmarx SARIF report..."
                     
-                    try {
-                        if (env.CHECKMARX_SARIF_REPORT && env.CHECKMARX_SARIF_REPORT != 'null') {
-                            // Send raw SARIF content without parsing to avoid readJSON dependency
-                            checkmarxReport = [
-                                format: 'sarif',
-                                content: env.CHECKMARX_SARIF_REPORT,
-                                summary: 'Checkmarx AST scan results in SARIF format',
-                                filePath: 'reports/checkmarx.sarif',
-                                fileSize: env.CHECKMARX_SARIF_REPORT.length(),
-                                captureMethod: 'file_content'
-                            ]
-                            echo "✅ SARIF report captured (${env.CHECKMARX_SARIF_REPORT.length()} characters)"
-                        } else {
+                    def checkmarxReport = null
+                    def checkmarxScanSummary = null
+                    
+                    if (params.Run_Checkmarx) {
+                        echo "🔍 Processing Checkmarx SARIF report..."
+                        
+                        try {
+                            // Parse scan summary from environment variable
+                            if (env.CHECKMARX_SCAN_SUMMARY) {
+                                checkmarxScanSummary = new groovy.json.JsonSlurperClassic().parseText(env.CHECKMARX_SCAN_SUMMARY)
+                                echo "✅ Scan summary parsed successfully"
+                            }
+                            
+                            if (env.CHECKMARX_SARIF_REPORT && env.CHECKMARX_SARIF_REPORT != 'null') {
+                                // Send raw SARIF content without parsing to avoid readJSON dependency
+                                checkmarxReport = [
+                                    format: 'sarif',
+                                    content: env.CHECKMARX_SARIF_REPORT,
+                                    summary: checkmarxScanSummary ?: 'Checkmarx AST scan results in SARIF format',
+                                    filePath: 'reports/checkmarx.sarif',
+                                    fileSize: env.CHECKMARX_SARIF_REPORT.length(),
+                                    captureMethod: 'file_content'
+                                ]
+                                echo "✅ SARIF report captured (${env.CHECKMARX_SARIF_REPORT.length()} characters)"
+                            } else {
+                                checkmarxReport = [
+                                    format: 'error',
+                                    content: null,
+                                    summary: checkmarxScanSummary ?: 'SARIF report was not captured - file may not exist',
+                                    captureMethod: 'failed'
+                                ]
+                                echo "❌ No SARIF report was captured"
+                            }
+                        } catch (Exception e) {
                             checkmarxReport = [
                                 format: 'error',
                                 content: null,
-                                summary: 'SARIF report was not captured - file may not exist',
-                                captureMethod: 'failed'
+                                summary: checkmarxScanSummary ?: ('Error processing SARIF report: ' + e.getMessage()),
+                                exception: e.getClass().getSimpleName()
                             ]
-                            echo "❌ No SARIF report was captured"
+                            echo "❌ Error processing SARIF report: ${e.getMessage()}"
                         }
-                    } catch (Exception e) {
-                        checkmarxReport = [
-                            format: 'error',
-                            content: null,
-                            summary: 'Error processing SARIF report: ' + e.getMessage(),
-                            exception: e.getClass().getSimpleName()
-                        ]
-                        echo "❌ Error processing SARIF report: ${e.getMessage()}"
+                    } else {
+                        echo "⏭️ Checkmarx scan was skipped"
                     }
-                } else {
-                    echo "⏭️ Checkmarx scan was skipped"
-                }
 
-                def payload = [
-                    jobName: env.JOB_NAME,
-                    buildNumber: env.BUILD_NUMBER,
-                    jobResult: jobResult,
-                    isSuccess: jobResult == 'SUCCESS',
-                    triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
-                    startTime: dateFormat.format(new Date(currentBuild.startTimeInMillis)),
-                    endTime: dateFormat.format(new Date()),
-                    duration: currentBuild.durationString,
-                    failedStage: failedStage,
-                    timezone: 'Asia/Bangkok',
-                    repository: [
-                        url: params.REPO_URL,
-                        branch: params.REPO_BRANCH
-                    ],
-                    buildUrl: env.BUILD_URL,
-                    parameters: [
-                        imageName: params.IMAGE_NAME_BACKEND,
-                        runCheckmarx: params.Run_Checkmarx
-                    ],
-                    checkmarxReport: checkmarxReport
-                ]
+                    def payload = [
+                        jobName: env.JOB_NAME,
+                        buildNumber: env.BUILD_NUMBER,
+                        jobResult: jobResult,
+                        isSuccess: jobResult == 'SUCCESS',
+                        triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
+                        startTime: dateFormat.format(new Date(currentBuild.startTimeInMillis)),
+                        endTime: dateFormat.format(new Date()),
+                        duration: currentBuild.durationString,
+                        failedStage: failedStage,
+                        timezone: 'Asia/Bangkok',
+                        repository: [
+                            url: params.REPO_URL,
+                            branch: params.REPO_BRANCH
+                        ],
+                        buildUrl: env.BUILD_URL,
+                        parameters: [
+                            imageName: params.IMAGE_NAME_BACKEND,
+                            runCheckmarx: params.Run_Checkmarx
+                        ],
+                        checkmarxReport: checkmarxReport,
+                        checkmarxScanSummary: checkmarxScanSummary
+                    ]
 
                 // Send data to n8n and get HTML report in response
                 def buildNumber = env.BUILD_NUMBER
@@ -256,8 +353,36 @@ pipeline {
                         echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
                         echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
                         
+                        if (params.Run_Checkmarx && checkmarxScanSummary) {
+                            echo "Checkmarx scan completed - Risk Level: ${checkmarxScanSummary.riskLevel ?: 'Unknown'}"
+                            echo "Vulnerabilities - Critical: ${checkmarxScanSummary.totalCritical ?: 0}, High: ${checkmarxScanSummary.totalHigh ?: 0}, Medium: ${checkmarxScanSummary.totalMedium ?: 0}, Low: ${checkmarxScanSummary.totalLow ?: 0}"
+                            
+                            // Send Checkmarx metrics to Datadog
+                            echo "DATADOG_METRIC: jenkins.checkmarx.critical=${checkmarxScanSummary.totalCritical ?: 0} type=gauge scan_type=checkmarx"
+                            echo "DATADOG_METRIC: jenkins.checkmarx.high=${checkmarxScanSummary.totalHigh ?: 0} type=gauge scan_type=checkmarx"
+                            echo "DATADOG_METRIC: jenkins.checkmarx.medium=${checkmarxScanSummary.totalMedium ?: 0} type=gauge scan_type=checkmarx"
+                            echo "DATADOG_METRIC: jenkins.checkmarx.low=${checkmarxScanSummary.totalLow ?: 0} type=gauge scan_type=checkmarx"
+                            
+                            // Send SAST metrics
+                            if (checkmarxScanSummary.vulnerabilities?.SAST) {
+                                def sast = checkmarxScanSummary.vulnerabilities.SAST
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.critical=${sast.critical ?: 0} type=gauge scan_type=sast"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.high=${sast.high ?: 0} type=gauge scan_type=sast"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.medium=${sast.medium ?: 0} type=gauge scan_type=sast"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.low=${sast.low ?: 0} type=gauge scan_type=sast"
+                            }
+                            
+                            // Send SCA metrics
+                            if (checkmarxScanSummary.vulnerabilities?.SCA) {
+                                def sca = checkmarxScanSummary.vulnerabilities.SCA
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.critical=${sca.critical ?: 0} type=gauge scan_type=sca"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.high=${sca.high ?: 0} type=gauge scan_type=sca"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.medium=${sca.medium ?: 0} type=gauge scan_type=sca"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.low=${sca.low ?: 0} type=gauge scan_type=sca"
+                            }
+                        }
+                        
                         if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
-                            echo "Checkmarx scan completed - Report size: ${checkmarxReport.fileSize} characters"
                             echo "DATADOG_METRIC: jenkins.checkmarx.report_size=${checkmarxReport.fileSize} type=gauge scan_type=checkmarx"
                         }
                     }
@@ -265,11 +390,7 @@ pipeline {
                 } catch (Exception e) {
                     echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
                 }
-                }
             }
         }
-
-
     }
 }
-
