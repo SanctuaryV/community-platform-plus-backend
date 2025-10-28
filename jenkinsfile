@@ -101,7 +101,7 @@ pipeline {
             }
         }
 
-        stage('Send to n8n & Datadog') {
+        stage('Send to n8n') {
             steps {
                 script {
                     sh '''
@@ -115,6 +115,30 @@ pipeline {
                     def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
                     def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                     dateFormat.setTimeZone(bangkokTimeZone)
+                
+                    // Capture Jenkins console logs and write to file
+                    def jenkinsLogs = null
+                    try {
+                        echo "📝 Capturing Jenkins console logs..."
+                        def logContent = currentBuild.rawBuild.getLog(1000).join('\n')
+                        def logFile = "reports/jenkins-build-${env.BUILD_NUMBER}.log"
+                        writeFile file: logFile, text: logContent
+                        jenkinsLogs = [
+                            filePath: logFile,
+                            content: logContent,
+                            lineCount: logContent.split('\n').length,
+                            fileSize: logContent.length()
+                        ]
+                        echo "✅ Jenkins logs captured (${jenkinsLogs.lineCount} lines, ${jenkinsLogs.fileSize} characters)"
+                        archiveArtifacts artifacts: logFile, fingerprint: true
+                    } catch (Exception e) {
+                        echo "❌ Failed to capture Jenkins logs: ${e.getMessage()}"
+                        jenkinsLogs = [
+                            error: e.getMessage(),
+                            filePath: null,
+                            content: null
+                        ]
+                    }
                 
                     def checkmarxReport = null
                     if (params.Run_Checkmarx) {
@@ -173,7 +197,8 @@ pipeline {
                             imageName: params.IMAGE_NAME_BACKEND,
                             runCheckmarx: params.Run_Checkmarx
                         ],
-                        checkmarxReport: checkmarxReport
+                        checkmarxReport: checkmarxReport,
+                        jenkinsLogs: jenkinsLogs
                     ]
 
                     def buildNumber = env.BUILD_NUMBER
@@ -217,40 +242,6 @@ pipeline {
                             echo "Note: n8n took too long to generate the report (> 5 minutes)"
                         }
                     }
-                    
-                    // try {
-                    //     echo "📊 Sending metrics to Datadog..."
-                        
-                    //     def triggeredBy = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System'
-                    //     def buildDurationSeconds = (currentBuild.duration ?: 0) / 1000.0
-                    //     def statusValue = jobResult == 'SUCCESS' ? 1 : 0
-                        
-                    //     def tags = [
-                    //         "job_name:${env.JOB_NAME}",
-                    //         "branch:${params.REPO_BRANCH}",
-                    //         "result:${jobResult.toLowerCase()}",
-                    //         "user:${triggeredBy}",
-                    //         "env:production",
-                    //         "service:community-platform-backend"
-                    //     ]
-                        
-                    //     datadog(collectLogs: true, tags: tags) {
-                    //         echo "DATADOG_METRIC: jenkins.job.duration=${buildDurationSeconds} type=gauge"
-                    //         echo "DATADOG_METRIC: jenkins.job.status=${statusValue} type=gauge" 
-                    //         echo "DATADOG_METRIC: jenkins.job.completed=1 type=count"
-                    //         echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
-                    //         echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
-                            
-                    //         if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
-                    //             echo "Checkmarx scan completed - Report size: ${checkmarxReport.fileSize} characters"
-                    //             echo "DATADOG_METRIC: jenkins.checkmarx.report_size=${checkmarxReport.fileSize} type=gauge"
-                    //         }
-                    //     }
-                        
-                    //     echo "✅ Data sent to Datadog successfully"
-                    // } catch (Exception e) {
-                    //     echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
-                    // }
                 }
             }
         }
