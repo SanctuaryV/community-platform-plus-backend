@@ -279,13 +279,13 @@ pipeline {
                         checkmarxScanSummary: checkmarxScanSummary
                     ]
 
-                // Send data to n8n and get HTML report in response
-                def buildNumber = env.BUILD_NUMBER
-                def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
-                def outFile = "reports/${expectedFileName}"
-                
-                try {
-                    echo "� Sending data to n8n and waiting for HTML report response..."
+                    // Send data to n8n and get HTML report in response
+                    def buildNumber = env.BUILD_NUMBER
+                    def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
+                    def outFile = "reports/${expectedFileName}"
+                    
+                    try {
+                        echo "📤 Sending data to n8n and waiting for HTML report response..."
                     
                     // Send request and save response directly to file
                     def res = httpRequest(
@@ -318,77 +318,78 @@ pipeline {
                         echo fileContent.take(500)
                     }
                     
-                } catch (Exception e) {
-                    echo "❌ Failed to get HTML from n8n: ${e.getMessage()}"
-                    if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
-                        echo "Note: SSL certificate issue with self-signed certificates"
-                    } else if (e.getMessage().contains('timeout')) {
-                        echo "Note: n8n took too long to generate the report (> 5 minutes)"
-                    }
-                }
-                
-                // Send data to Datadog
-                try {
-                    def triggeredBy = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System'
-                    def buildDurationSeconds = (currentBuild.duration ?: 0) / 1000.0
-                    def statusValue = jobResult == 'SUCCESS' ? 1 : 0
-                    
-                    def tags = [
-                        "job_name:${env.JOB_NAME}",
-                        "branch:${params.REPO_BRANCH}",
-                        "result:${jobResult.toLowerCase()}",
-                        "user:${triggeredBy}",
-                        "env:production",
-                        "service:community-platform-backend"
-                    ]
-                    
-                    // Send data to Datadog using plugin
-                    datadog(collectLogs: true, tags: tags) {
-                        // Log structured data for Datadog to collect
-                        echo "DATADOG_METRIC: jenkins.job.duration=${buildDurationSeconds} type=gauge"
-                        echo "DATADOG_METRIC: jenkins.job.status=${statusValue} type=gauge" 
-                        echo "DATADOG_METRIC: jenkins.job.completed=1 type=count"
-                        
-                        // Send standard logs
-                        echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
-                        echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
-                        
-                        if (params.Run_Checkmarx && checkmarxScanSummary) {
-                            echo "Checkmarx scan completed - Risk Level: ${checkmarxScanSummary.riskLevel ?: 'Unknown'}"
-                            echo "Vulnerabilities - Critical: ${checkmarxScanSummary.totalCritical ?: 0}, High: ${checkmarxScanSummary.totalHigh ?: 0}, Medium: ${checkmarxScanSummary.totalMedium ?: 0}, Low: ${checkmarxScanSummary.totalLow ?: 0}"
-                            
-                            // Send Checkmarx metrics to Datadog
-                            echo "DATADOG_METRIC: jenkins.checkmarx.critical=${checkmarxScanSummary.totalCritical ?: 0} type=gauge scan_type=checkmarx"
-                            echo "DATADOG_METRIC: jenkins.checkmarx.high=${checkmarxScanSummary.totalHigh ?: 0} type=gauge scan_type=checkmarx"
-                            echo "DATADOG_METRIC: jenkins.checkmarx.medium=${checkmarxScanSummary.totalMedium ?: 0} type=gauge scan_type=checkmarx"
-                            echo "DATADOG_METRIC: jenkins.checkmarx.low=${checkmarxScanSummary.totalLow ?: 0} type=gauge scan_type=checkmarx"
-                            
-                            // Send SAST metrics
-                            if (checkmarxScanSummary.vulnerabilities?.SAST) {
-                                def sast = checkmarxScanSummary.vulnerabilities.SAST
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.critical=${sast.critical ?: 0} type=gauge scan_type=sast"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.high=${sast.high ?: 0} type=gauge scan_type=sast"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.medium=${sast.medium ?: 0} type=gauge scan_type=sast"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sast.low=${sast.low ?: 0} type=gauge scan_type=sast"
-                            }
-                            
-                            // Send SCA metrics
-                            if (checkmarxScanSummary.vulnerabilities?.SCA) {
-                                def sca = checkmarxScanSummary.vulnerabilities.SCA
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.critical=${sca.critical ?: 0} type=gauge scan_type=sca"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.high=${sca.high ?: 0} type=gauge scan_type=sca"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.medium=${sca.medium ?: 0} type=gauge scan_type=sca"
-                                echo "DATADOG_METRIC: jenkins.checkmarx.sca.low=${sca.low ?: 0} type=gauge scan_type=sca"
-                            }
-                        }
-                        
-                        if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
-                            echo "DATADOG_METRIC: jenkins.checkmarx.report_size=${checkmarxReport.fileSize} type=gauge scan_type=checkmarx"
+                    } catch (Exception e) {
+                        echo "❌ Failed to get HTML from n8n: ${e.getMessage()}"
+                        if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
+                            echo "Note: SSL certificate issue with self-signed certificates"
+                        } else if (e.getMessage().contains('timeout')) {
+                            echo "Note: n8n took too long to generate the report (> 5 minutes)"
                         }
                     }
-                    echo "✅ Data sent to Datadog successfully"
-                } catch (Exception e) {
-                    echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
+                    
+                    // Send data to Datadog
+                    try {
+                        def triggeredBy = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System'
+                        def buildDurationSeconds = (currentBuild.duration ?: 0) / 1000.0
+                        def statusValue = jobResult == 'SUCCESS' ? 1 : 0
+                        
+                        def tags = [
+                            "job_name:${env.JOB_NAME}",
+                            "branch:${params.REPO_BRANCH}",
+                            "result:${jobResult.toLowerCase()}",
+                            "user:${triggeredBy}",
+                            "env:production",
+                            "service:community-platform-backend"
+                        ]
+                        
+                        // Send data to Datadog using plugin
+                        datadog(collectLogs: true, tags: tags) {
+                            // Log structured data for Datadog to collect
+                            echo "DATADOG_METRIC: jenkins.job.duration=${buildDurationSeconds} type=gauge"
+                            echo "DATADOG_METRIC: jenkins.job.status=${statusValue} type=gauge" 
+                            echo "DATADOG_METRIC: jenkins.job.completed=1 type=count"
+                            
+                            // Send standard logs
+                            echo "Build: ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${jobResult}"
+                            echo "User: ${triggeredBy}, Duration: ${buildDurationSeconds}s, Branch: ${params.REPO_BRANCH}"
+                            
+                            if (params.Run_Checkmarx && checkmarxScanSummary) {
+                                echo "Checkmarx scan completed - Risk Level: ${checkmarxScanSummary.riskLevel ?: 'Unknown'}"
+                                echo "Vulnerabilities - Critical: ${checkmarxScanSummary.totalCritical ?: 0}, High: ${checkmarxScanSummary.totalHigh ?: 0}, Medium: ${checkmarxScanSummary.totalMedium ?: 0}, Low: ${checkmarxScanSummary.totalLow ?: 0}"
+                                
+                                // Send Checkmarx metrics to Datadog
+                                echo "DATADOG_METRIC: jenkins.checkmarx.critical=${checkmarxScanSummary.totalCritical ?: 0} type=gauge scan_type=checkmarx"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.high=${checkmarxScanSummary.totalHigh ?: 0} type=gauge scan_type=checkmarx"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.medium=${checkmarxScanSummary.totalMedium ?: 0} type=gauge scan_type=checkmarx"
+                                echo "DATADOG_METRIC: jenkins.checkmarx.low=${checkmarxScanSummary.totalLow ?: 0} type=gauge scan_type=checkmarx"
+                                
+                                // Send SAST metrics
+                                if (checkmarxScanSummary.vulnerabilities?.SAST) {
+                                    def sast = checkmarxScanSummary.vulnerabilities.SAST
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.critical=${sast.critical ?: 0} type=gauge scan_type=sast"
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.high=${sast.high ?: 0} type=gauge scan_type=sast"
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.medium=${sast.medium ?: 0} type=gauge scan_type=sast"
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sast.low=${sast.low ?: 0} type=gauge scan_type=sast"
+                                }
+                                
+                                // Send SCA metrics
+                                if (checkmarxScanSummary.vulnerabilities?.SCA) {
+                                    def sca = checkmarxScanSummary.vulnerabilities.SCA
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.critical=${sca.critical ?: 0} type=gauge scan_type=sca"
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.high=${sca.high ?: 0} type=gauge scan_type=sca"
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.medium=${sca.medium ?: 0} type=gauge scan_type=sca"
+                                    echo "DATADOG_METRIC: jenkins.checkmarx.sca.low=${sca.low ?: 0} type=gauge scan_type=sca"
+                                }
+                            }
+                            
+                            if (params.Run_Checkmarx && checkmarxReport?.fileSize) {
+                                echo "DATADOG_METRIC: jenkins.checkmarx.report_size=${checkmarxReport.fileSize} type=gauge scan_type=checkmarx"
+                            }
+                        }
+                        echo "✅ Data sent to Datadog successfully"
+                    } catch (Exception e) {
+                        echo "❌ Failed to send data to Datadog: ${e.getMessage()}"
+                    }
                 }
             }
         }
