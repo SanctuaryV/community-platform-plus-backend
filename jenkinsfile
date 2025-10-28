@@ -139,19 +139,27 @@ pipeline {
                     def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                     dateFormat.setTimeZone(bangkokTimeZone)
                 
-                    // Capture Jenkins console logs and write to file
+                    // Extract Scan Summary from Jenkins logs
                     def jenkinsLogs = null
                     def scanSummary = null
                     try {
-                        echo "📝 Capturing Jenkins console logs..."
+                        echo "📝 Extracting Scan Summary from console logs..."
+                        
+                        // Save full console log to temporary file
                         def logContent = currentBuild.rawBuild.getLog(1000).join('\n')
+                        writeFile file: 'reports/temp-console.log', text: logContent
                         
-                        // Extract only the Scan Summary section from logs
-                        def summaryPattern = /(?s)Scan Summary:.*?---------------------------------------------------------------------\s+\|\s+TOTAL.*?\|\s+---------------------------------------------------------------------/
-                        def matcher = logContent =~ summaryPattern
+                        // Use shell to extract the Scan Summary section
+                        scanSummary = sh(script: '''
+                            if [ -f "reports/temp-console.log" ]; then
+                                # Extract from "Scan Summary:" to "Checkmarx One - Scan Summary"
+                                sed -n '/Scan Summary:/,/Checkmarx One - Scan Summary/p' reports/temp-console.log | head -n -1
+                            else
+                                echo "Console log file not found"
+                            fi
+                        ''', returnStdout: true).trim()
                         
-                        if (matcher.find()) {
-                            scanSummary = matcher.group(0).trim()
+                        if (scanSummary && scanSummary.length() > 50) {
                             def summaryFile = "reports/checkmarx-scan-summary-${env.BUILD_NUMBER}.txt"
                             writeFile file: summaryFile, text: scanSummary
                             echo "✅ Scan Summary extracted and saved to ${summaryFile}"
@@ -159,20 +167,29 @@ pipeline {
                             echo "${scanSummary}"
                             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                             archiveArtifacts artifacts: summaryFile, fingerprint: true
+                            
+                            jenkinsLogs = [
+                                scanSummary: scanSummary,
+                                summaryFound: true,
+                                summaryLength: scanSummary.length()
+                            ]
                         } else {
                             echo "⚠️ Scan Summary not found in console logs"
-                            scanSummary = "Scan Summary not found in console output"
+                            jenkinsLogs = [
+                                scanSummary: "Scan Summary not found in console output",
+                                summaryFound: false
+                            ]
                         }
                         
-                        jenkinsLogs = [
-                            scanSummary: scanSummary,
-                            summaryFound: matcher.find()
-                        ]
+                        // Clean up temp file
+                        sh 'rm -f reports/temp-console.log'
+                        
                     } catch (Exception e) {
-                        echo "❌ Failed to capture Jenkins logs: ${e.getMessage()}"
+                        echo "❌ Failed to extract Scan Summary: ${e.getMessage()}"
                         jenkinsLogs = [
                             error: e.getMessage(),
-                            scanSummary: null
+                            scanSummary: null,
+                            summaryFound: false
                         ]
                     }
                 
