@@ -44,7 +44,7 @@ pipeline {
                         echo "🔍 Running Checkmarx scan..."
                         
                         // Run Checkmarx scan with custom output path
-                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format sarif --output-name checkmarx --output-path reports',
+                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format sarif,summaryConsole --output-name checkmarx --output-path reports',
                             baseAuthUrl: '',
                             branchName: "${APP_REPO_BRANCH}",
                             checkmarxInstallation: 'Checkmarx',
@@ -53,6 +53,18 @@ pipeline {
                             serverUrl: '',
                             tenantName: '',
                             useOwnAdditionalOptions: true
+                        
+                        echo "📋 Capturing Checkmarx scan summary..."
+                        
+                        // Capture scan summary from console output
+                        def scanSummary = sh(script: '''
+                            # Extract only the Scan Summary section from the logs
+                            if [ -f "reports/checkmarx-summary.txt" ]; then
+                                cat "reports/checkmarx-summary.txt"
+                            else
+                                echo "SUMMARY_NOT_FOUND"
+                            fi
+                        ''', returnStdout: true).trim()
                         
                         echo "📋 Capturing Checkmarx SARIF report..."
                         
@@ -76,6 +88,17 @@ pipeline {
                         } else {
                             echo "❌ SARIF report not found"
                             env.CHECKMARX_SARIF_REPORT = null
+                        }
+                        
+                        // Store scan summary
+                        if (scanSummary != "SUMMARY_NOT_FOUND") {
+                            env.CHECKMARX_SCAN_SUMMARY = scanSummary
+                            echo "✅ Scan Summary captured"
+                            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            echo "${scanSummary}"
+                            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        } else {
+                            env.CHECKMARX_SCAN_SUMMARY = null
                         }
                         
                         // Archive reports for backup
@@ -149,7 +172,8 @@ pipeline {
                                 checkmarxReport = [
                                     format: 'sarif',
                                     content: env.CHECKMARX_SARIF_REPORT,
-                                    summary: 'Checkmarx AST scan results in SARIF format',
+                                    summary: env.CHECKMARX_SCAN_SUMMARY ?: 'Scan summary not available',
+                                    scanSummary: env.CHECKMARX_SCAN_SUMMARY,
                                     filePath: 'reports/checkmarx.sarif',
                                     fileSize: env.CHECKMARX_SARIF_REPORT.length(),
                                     captureMethod: 'file_content'
@@ -159,7 +183,8 @@ pipeline {
                                 checkmarxReport = [
                                     format: 'error',
                                     content: null,
-                                    summary: 'SARIF report was not captured - file may not exist',
+                                    summary: env.CHECKMARX_SCAN_SUMMARY ?: 'SARIF report was not captured - file may not exist',
+                                    scanSummary: env.CHECKMARX_SCAN_SUMMARY,
                                     captureMethod: 'failed'
                                 ]
                                 echo "❌ No SARIF report was captured"
@@ -169,6 +194,7 @@ pipeline {
                                 format: 'error',
                                 content: null,
                                 summary: 'Error processing SARIF report: ' + e.getMessage(),
+                                scanSummary: env.CHECKMARX_SCAN_SUMMARY,
                                 exception: e.getClass().getSimpleName()
                             ]
                             echo "❌ Error processing SARIF report: ${e.getMessage()}"
