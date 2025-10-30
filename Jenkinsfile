@@ -27,7 +27,7 @@ pipeline {
                 stage('Deploy with Docker Compose') {
             steps {
                 sh """
-                    echo "IMAGE_TAG= $IMAGE_TAG" > .env
+                    
 
                     echo "Creating docker-compose.yml..."
                     cat <<EOF > docker-compose.yml
