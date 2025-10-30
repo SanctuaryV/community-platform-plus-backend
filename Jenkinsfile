@@ -4,7 +4,8 @@ pipeline {
         environment {
         IMAGE_NAME_FRONTEND = "${params.IMAGE_NAME_FRONTEND}"
         IMAGE_NAME_BACKEND  = "${params.IMAGE_NAME_BACKEND}"
-        IMAGE_TAG           = "${params.IMAGE_TAG}"         
+        IMAGE_TAG_FRONTEND  = "${params.IMAGE_TAG_FRONTEND}"
+        IMAGE_TAG_BACKEND   = "${params.IMAGE_TAG_BACKEND}"         
         GAR_REGISTRY      = "${params.DOCKER_REG_URL}" 
         GCP_PROJECT     = "${params.DOCKER_REG_NAME}" 
         GAR_REPO            = "${params.REG_REPO}"        
@@ -49,7 +50,7 @@ services:
       - db_data:/var/lib/mysql
 
   backend:
-    image: $GAR_REGISTRY/$GCP_PROJECT/$GAR_REPO/$IMAGE_NAME_BACKEND:$IMAGE_TAG
+    image: $GAR_REGISTRY/$GCP_PROJECT/$GAR_REPO/$IMAGE_NAME_BACKEND:$IMAGE_TAG_BACKEND
     container_name: backend
     restart: always
     depends_on:
@@ -68,7 +69,7 @@ services:
       - ./uploads:/app/uploads
 
   frontend:
-    image: $GAR_REGISTRY/$GCP_PROJECT/$GAR_REPO/$IMAGE_NAME_FRONTEND:$IMAGE_TAG
+    image: $GAR_REGISTRY/$GCP_PROJECT/$GAR_REPO/$IMAGE_NAME_FRONTEND:$IMAGE_TAG_FRONTEND
     container_name: frontend
     restart: always
     depends_on:
