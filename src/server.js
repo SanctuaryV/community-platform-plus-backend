@@ -1,6 +1,7 @@
 const express = require('express');
+const http = require('http');                // NEW
 const cors = require('cors');
-const socketIo = require('socket.io');
+const { Server } = require('socket.io');     // prefer import style
 const bodyParser = require('body-parser');
 const authRoutes = require('./routes/auth.routes');
 const chat = require('./routes/chat.routes');
@@ -15,31 +16,24 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(express.json());
+// CORS for REST (since we proxy via Nginx, this can be permissive or specific)
 app.use(cors({
-    origin: "*",  // รองรับทุก origin
-    methods: ['GET', 'POST', 'PUT'],
+  origin: 'http://34.142.188.91',   // or your real domain; same-origin via proxy
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT']
 }));
 
+app.use(express.json());
+app.use(bodyParser.json());
+
+// Static assets
 app.use('/post', express.static(path.join(__dirname, '..', 'post')));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
-// สร้าง HTTP server และเชื่อมกับ socket.io
-const server = app.listen(port, '0.0.0.0', () => {
-    console.log(`Server is running on port ${port}`);
-});
+// Health check (useful for probes & quick tests)
+app.get('/health', (req, res) => res.status(200).send('ok'));
 
-const io = socketIo(server, {
-    cors: {
-        origin: "*",  // รองรับทุก origin
-        methods: ['GET', 'POST'],
-    },
-    transports: ['websocket', 'polling'],
-});
-
-app.use(bodyParser.json());
-
-// กำหนดเส้นทาง
+// Routes
 app.use('/', authRoutes);
 app.use('/', messageRoutes);
 app.use('/', profileRoutes);
@@ -48,36 +42,52 @@ app.use('/', postRoutes);
 app.use('/', chat);
 app.use('/', mainRoutes);
 
-// ตรวจสอบการเชื่อมต่อฐานข้อมูล
-connection.connect((err) => {
-    if (err) {
-        console.error('error connecting: ' + err.stack);
-        return;
-    }
-    console.log('connected to database');
+// Create HTTP server explicitly and attach Socket.IO with explicit PATH
+const server = http.createServer(app);
+const io = new Server(server, {
+  path: '/socket.io',
+  transports: ['websocket', 'polling'],
+  // With Nginx same-origin proxy, CORS is not required for WS,
+  // but leaving it explicit is okay:
+  cors: {
+    origin: 'http://34.142.188.91',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
 });
 
-// เชื่อมต่อกับ socket.io
 io.on('connection', (socket) => {
-    socket.on('joinRoom', (roomId) => {
-        socket.join(roomId);
-        console.log(`User joined room: ${roomId}`);
-        socket.to(roomId).emit('roomJoined', { roomId });
-    });
+  socket.on('joinRoom', (roomId) => {
+    socket.join(roomId);
+    console.log(`User joined room: ${roomId}`);
+    socket.to(roomId).emit('roomJoined', { roomId });
+  });
 
-    socket.on('send_message', (messageData) => {
-        const { roomId, senderId, message } = messageData;
-        const query = 'INSERT INTO messages (room_id, sender_id, message) VALUES (?, ?, ?)';
-        
-        connection.execute(query, [roomId, senderId, message], (err, result) => {
-            if (err) {
-                console.error('Error inserting message:', err);
-                return;
-            }
-            console.log('Message inserted into database');
-            io.to(roomId).emit('receive_message', messageData);
-        });
+  socket.on('send_message', (messageData) => {
+    const { roomId, senderId, message } = messageData;
+    const query = 'INSERT INTO messages (room_id, sender_id, message) VALUES (?, ?, ?)';
+    connection.execute(query, [roomId, senderId, message], (err) => {
+      if (err) {
+        console.error('Error inserting message:', err);
+        return;
+      }
+      io.to(roomId).emit('receive_message', messageData);
     });
+  });
 
-    socket.on('disconnect', () => {});
+  socket.on('disconnect', () => {});
+});
+
+// DB connect
+connection.connect((err) => {
+  if (err) {
+    console.error('error connecting: ' + err.stack);
+    return;
+  }
+  console.log('connected to database');
+});
+
+// Start server
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running on port ${port}`);
 });
