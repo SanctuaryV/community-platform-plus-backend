@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -6,20 +5,24 @@ pipeline {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/SanctuaryV/community-platform-plus-backend.git', description: 'Git repo URL')
         string(name: 'REPO_BRANCH', defaultValue: 'main', description: 'Branch to checkout')
         string(name: 'IMAGE_NAME_BACKEND', defaultValue: 'community-platform-plus-backend', description: 'Docker image name for backend')
-        string(name: 'N8N_WEBHOOK_URL', defaultValue: 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313', description: 'n8n Production Webhook URL')
-
+        choice(name: 'AI_MODEL', choices: ['gemini', 'gpt'], description: 'Select AI model for report generation')
         booleanParam(name: 'Run_Checkmarx', defaultValue: false, description: 'Run Checkmarx scan')
         booleanParam(name: 'PushToGar', defaultValue: false, description: 'Push to Google Artifact Registry')
     }
 
     environment {
-        APP_REPO_URL    = "${params.REPO_URL}"
+        APP_REPO_URL = "${params.REPO_URL}"
         APP_REPO_BRANCH = "${params.REPO_BRANCH}"
         IMAGE_NAME_BACKEND = "${params.IMAGE_NAME_BACKEND}"
-        IMAGE_TAG = "${BUILD_NUMBER}" 
+        IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
+        stage('Checkout SCM (Jenkinsfile)') {
+            steps {
+        checkout scm
+            }
+        }
         stage('Clone Repository') {
             steps {
                 cleanWs()
@@ -31,43 +34,292 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 sh '''
-                  echo "Installing depaendencies..."
-                  npm install
+                    echo "Installing dependencies..."
+                    npm install
                 '''
             }
         }
-
 
         stage('SAST - Checkmarx') {
             when {
                 expression { return params.Run_Checkmarx == true }
             }
             steps {
-                checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca"',
-                    baseAuthUrl: '',
-                    branchName: "${APP_REPO_BRANCH}",
-                    checkmarxInstallation: 'Checkmarx',
-                    credentialsId: '',
-                    projectName: "SanctuaryV/community-platform-plus-frontend",
-                    serverUrl: '',
-                    tenantName: '',
-                    useOwnAdditionalOptions: true
+                script {
+                    try {
+                        echo "🔍 Running Checkmarx scan..."
+                        
+                        // Run Checkmarx scan with custom output path
+                        checkmarxASTScanner additionalOptions: '--project-groups intern --scan-types "sast,sca" --report-format sarif,summaryConsole --output-name checkmarx --output-path reports',
+                            baseAuthUrl: '',
+                            branchName: "${APP_REPO_BRANCH}",
+                            checkmarxInstallation: 'Checkmarx',
+                            credentialsId: '',
+                            projectName: "SanctuaryV/community-platform-plus-backend",
+                            serverUrl: '',
+                            tenantName: '',
+                            useOwnAdditionalOptions: true
+                        
+                        echo "📋 Capturing Checkmarx scan summary..."
+                        
+                        // Capture scan summary from console output
+                        def scanSummary = sh(script: '''
+                            # Extract only the Scan Summary section from the logs
+                            if [ -f "reports/checkmarx-summary.txt" ]; then
+                                cat "reports/checkmarx-summary.txt"
+                            else
+                                echo "SUMMARY_NOT_FOUND"
+                            fi
+                        ''', returnStdout: true).trim()
+                        
+                        echo "📋 Capturing Checkmarx SARIF report..."
+                        
+                        // Capture SARIF file content
+                        def sarifContent = sh(script: '''
+                            if [ -f "reports/checkmarx.sarif" ]; then
+                                echo "SARIF_FOUND"
+                                cat "reports/checkmarx.sarif"
+                            else
+                                echo "SARIF_NOT_FOUND"
+                            fi
+                        ''', returnStdout: true).trim()
+                        
+                        // Store SARIF content in environment variable
+                        def sarifNotFound = "SARIF_NOT_FOUND"
+                        def sarifFound = "SARIF_FOUND"
+                        
+                        if (sarifContent != sarifNotFound && sarifContent.startsWith(sarifFound)) {
+                            env.CHECKMARX_SARIF_REPORT = sarifContent.substring(sarifContent.indexOf('\n') + 1)
+                            echo "✅ SARIF report captured (${env.CHECKMARX_SARIF_REPORT.length()} characters)"
+                        } else {
+                            echo "❌ SARIF report not found"
+                            env.CHECKMARX_SARIF_REPORT = null
+                        }
+                        
+                        // Store scan summary
+                        if (scanSummary != "SUMMARY_NOT_FOUND") {
+                            env.CHECKMARX_SCAN_SUMMARY = scanSummary
+                            echo "✅ Scan Summary captured"
+                            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            echo "${scanSummary}"
+                            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        } else {
+                            env.CHECKMARX_SCAN_SUMMARY = null
+                        }
+                        
+                        // Archive reports for backup
+                        archiveArtifacts artifacts: 'reports/**', fingerprint: true
+                        
+                    } catch (Exception e) {
+                        echo "❌ Checkmarx scan failed: ${e.getMessage()}"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
             }
         }
 
-                stage('Build Docker Image') {
+        stage('Build Docker Image') {
             steps {
-             
+                script {
                     sh '''
                         echo "Building backend Docker image..."
                         docker build --no-cache -t $IMAGE_NAME_BACKEND:$IMAGE_TAG .
                         docker images | grep $IMAGE_NAME_BACKEND
                     '''
-                
+                }
             }
         }
 
-               stage('Push Image to GAR') {
+        stage('Send to n8n') {
+            steps {
+                script {
+                    sh '''
+                        mkdir -p reports
+                        chmod 755 reports
+                    '''
+                    
+                    def jobResult = currentBuild.result ?: 'SUCCESS'
+                    def failedStage = jobResult != 'SUCCESS' ? (env.STAGE_NAME ?: 'Unknown Stage') : 'None'
+
+                    def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
+                    def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+                    dateFormat.setTimeZone(bangkokTimeZone)
+                
+                    // Extract Scan Summary from Jenkins logs
+                    def jenkinsLogs = null
+                    def scanSummary = null
+                    try {
+                        echo "📝 Extracting Scan Summary from console logs..."
+                        
+                        // Save full console log to temporary file
+                        def logContent = currentBuild.rawBuild.getLog(1000).join('\n')
+                        writeFile file: 'reports/temp-console.log', text: logContent
+                        
+                        // Use shell to extract the Scan Summary section
+                        scanSummary = sh(script: '''
+                            if [ -f "reports/temp-console.log" ]; then
+                                # Extract from "Scan Summary:" to "Checkmarx One - Scan Summary"
+                                sed -n '/Scan Summary:/,/Checkmarx One - Scan Summary/p' reports/temp-console.log | head -n -1
+                            else
+                                echo "Console log file not found"
+                            fi
+                        ''', returnStdout: true).trim()
+                        
+                        if (scanSummary && scanSummary.length() > 50) {
+                            def summaryFile = "reports/checkmarx-scan-summary-${env.BUILD_NUMBER}.txt"
+                            writeFile file: summaryFile, text: scanSummary
+                            echo "✅ Scan Summary extracted and saved to ${summaryFile}"
+                            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            echo "${scanSummary}"
+                            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            archiveArtifacts artifacts: summaryFile, fingerprint: true
+                            
+                            jenkinsLogs = [
+                                scanSummary: scanSummary,
+                                summaryFound: true,
+                                summaryLength: scanSummary.length()
+                            ]
+                        } else {
+                            echo "⚠️ Scan Summary not found in console logs"
+                            jenkinsLogs = [
+                                scanSummary: "Scan Summary not found in console output",
+                                summaryFound: false
+                            ]
+                        }
+                        
+                        // Clean up temp file
+                        sh 'rm -f reports/temp-console.log'
+                        
+                    } catch (Exception e) {
+                        echo "❌ Failed to extract Scan Summary: ${e.getMessage()}"
+                        jenkinsLogs = [
+                            error: e.getMessage(),
+                            scanSummary: null,
+                            summaryFound: false
+                        ]
+                    }
+                
+                    def checkmarxReport = null
+                    if (params.Run_Checkmarx) {
+                        echo "🔍 Processing Checkmarx SARIF report..."
+                        
+                        try {
+                            if (env.CHECKMARX_SARIF_REPORT && env.CHECKMARX_SARIF_REPORT != 'null') {
+                                checkmarxReport = [
+                                    format: 'sarif',
+                                    content: env.CHECKMARX_SARIF_REPORT,
+                                    summary: env.CHECKMARX_SCAN_SUMMARY ?: 'Scan summary not available',
+                                    scanSummary: env.CHECKMARX_SCAN_SUMMARY,
+                                    filePath: 'reports/checkmarx.sarif',
+                                    fileSize: env.CHECKMARX_SARIF_REPORT.length(),
+                                    captureMethod: 'file_content'
+                                ]
+                                echo "✅ SARIF report captured (${env.CHECKMARX_SARIF_REPORT.length()} characters)"
+                            } else {
+                                checkmarxReport = [
+                                    format: 'error',
+                                    content: null,
+                                    summary: env.CHECKMARX_SCAN_SUMMARY ?: 'SARIF report was not captured - file may not exist',
+                                    scanSummary: env.CHECKMARX_SCAN_SUMMARY,
+                                    captureMethod: 'failed'
+                                ]
+                                echo "❌ No SARIF report was captured"
+                            }
+                        } catch (Exception e) {
+                            checkmarxReport = [
+                                format: 'error',
+                                content: null,
+                                summary: 'Error processing SARIF report: ' + e.getMessage(),
+                                scanSummary: env.CHECKMARX_SCAN_SUMMARY,
+                                exception: e.getClass().getSimpleName()
+                            ]
+                            echo "❌ Error processing SARIF report: ${e.getMessage()}"
+                        }
+                    } else {
+                        echo "⏭️ Checkmarx scan was skipped"
+                    }
+
+                    def payload = [
+                        jobName: env.JOB_NAME,
+                        buildNumber: env.BUILD_NUMBER,
+                        jobResult: jobResult,
+                        isSuccess: jobResult == 'SUCCESS',
+                        triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
+                        startTime: dateFormat.format(new Date(currentBuild.startTimeInMillis)),
+                        endTime: dateFormat.format(new Date()),
+                        duration: currentBuild.durationString,
+                        failedStage: failedStage,
+                        timezone: 'Asia/Bangkok',
+                        repository: [
+                            url: params.REPO_URL,
+                            branch: params.REPO_BRANCH
+                        ],
+                        buildUrl: env.BUILD_URL,
+                        parameters: [
+                            imageName: params.IMAGE_NAME_BACKEND,
+                            runCheckmarx: params.Run_Checkmarx,
+                            aiModel: params.AI_MODEL
+                        ],
+                        checkmarxReport: checkmarxReport,
+                        jenkinsLogs: jenkinsLogs
+                    ]
+
+                    def buildNumber = env.BUILD_NUMBER
+                    def expectedFileName = "Report-jenkins-checkmarx-test-build-${buildNumber}.html"
+                    def outFile = "reports/${expectedFileName}"
+                    
+                    // Select webhook URL based on AI model choice
+                    def webhookUrl = ''
+                    if (params.AI_MODEL == 'gpt') {
+                        webhookUrl = 'https://35.247.160.122:5678/webhook/198e19f9-60aa-463f-b5dd-bc5e88285928'
+                        echo "🤖 Using GPT model for report generation"
+                    } else {
+                        webhookUrl = 'https://35.247.160.122:5678/webhook/627982e1-ee55-4a89-a91a-901e8436b313'
+                        echo "🤖 Using Gemini model for report generation"
+                    }
+                    
+                    try {
+                        echo "📤 Sending data to n8n and waiting for HTML report response..."
+                        
+                        def res = httpRequest(
+                            httpMode: 'POST',
+                            url: webhookUrl,
+                            contentType: 'APPLICATION_JSON',
+                            requestBody: groovy.json.JsonOutput.toJson(payload),
+                            timeout: 300,
+                            ignoreSslErrors: true,
+                            validResponseCodes: '200:299',
+                            outputFile: outFile
+                        )
+                        
+                        echo "✅ Response received from n8n - Status: ${res.status}"
+                        
+                        def fileContent = readFile(outFile)
+                        
+                        if (fileContent.contains('<html') || fileContent.contains('<!DOCTYPE')) {
+                            echo "✅ Valid HTML report received! Size: ${fileContent.length()} characters"
+                            archiveArtifacts artifacts: outFile, fingerprint: true, onlyIfSuccessful: false
+                            echo "📁 Report archived as Jenkins artifact: ${outFile}"
+                            echo "🎉 HTML report successfully received and archived!"
+                        } else {
+                            echo "⚠️ Response received but doesn't contain valid HTML"
+                            echo "📄 Response preview (first 500 chars):"
+                            echo fileContent.take(500)
+                        }
+                        
+                    } catch (Exception e) {
+                        echo "❌ Failed to get HTML from n8n: ${e.getMessage()}"
+                        if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
+                            echo "Note: SSL certificate issue with self-signed certificates"
+                        } else if (e.getMessage().contains('timeout')) {
+                            echo "Note: n8n took too long to generate the report (> 5 minutes)"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Push Image to GAR') {
             when {
                 expression { return params.PushToGar == true }
             }
@@ -85,65 +337,5 @@ pipeline {
                 }
             }
         }
-
     }
-    post {
-        always {
-            script {
-                def jobResult = currentBuild.result ?: 'SUCCESS'
-                def failedStage = 'None'
-                
-                if (jobResult != 'SUCCESS') {
-                    failedStage = env.STAGE_NAME ?: 'Unknown Stage'
-                }
-
-                def bangkokTimeZone = TimeZone.getTimeZone('Asia/Bangkok')
-                def dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                dateFormat.setTimeZone(bangkokTimeZone)
-                
-                def payload = [
-                    jobName: env.JOB_NAME,
-                    buildNumber: env.BUILD_NUMBER,
-                    jobResult: jobResult,
-                    isSuccess: jobResult == 'SUCCESS',
-                    triggeredBy: currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')?.get(0)?.userId ?: 'System',
-                    startTime: dateFormat.format(new Date(currentBuild.startTimeInMillis)),
-                    endTime: dateFormat.format(new Date()),
-                    duration: currentBuild.durationString,
-                    failedStage: failedStage,
-                    timezone: 'Asia/Bangkok',
-                    repository: [
-                        url: params.REPO_URL,
-                        branch: params.REPO_BRANCH
-                    ],
-                    buildUrl: env.BUILD_URL,
-                    parameters: [
-                        imageName: params.IMAGE_NAME_BACKEND,
-                        runCheckmarx: params.Run_Checkmarx
-                    ]
-                ]
-
-                try {
-                    httpRequest(
-                        httpMode: 'POST',
-                        url: params.N8N_WEBHOOK_URL,
-                        contentType: 'APPLICATION_JSON',
-                        requestBody: groovy.json.JsonOutput.toJson(payload),
-                        timeout: 30,
-                        ignoreSslErrors: true,
-                        acceptType: 'APPLICATION_JSON',
-                        validResponseCodes: '200:299',
-                        quiet: false
-                    )
-                    echo "✅ Webhook sent to n8n (self-signed SSL) successfully"
-                } catch (Exception e) {
-                    echo "❌ Failed to send webhook to n8n: ${e.getMessage()}"
-                    if (e.getMessage().contains('SSL') || e.getMessage().contains('certificate')) {
-                        echo "Note: This appears to be an SSL certificate issue with self-signed certificates"
-                    }
-                }
-            }
-        }
-    }
-}  
-
+}
