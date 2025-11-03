@@ -18,6 +18,11 @@ pipeline {
     }
 
     stages {
+        stage('Checkout SCM (Jenkinsfile)') {
+            steps {
+        checkout scm
+            }
+        }
         stage('Clone Repository') {
             steps {
                 cleanWs()
@@ -125,37 +130,6 @@ pipeline {
             }
         }
 
-               stage('Push Image to GAR') {
-            when {
-                expression { return params.PushToGar == true }
-            }
-            steps {
-                withCredentials([file(credentialsId: 'GCP-GAR', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
-                    sh '''
-                        echo "Authenticating with GCP..."
-                        gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
-                        gcloud auth configure-docker $DOCKER_REG_URL
-
-                        echo "Tagging and pushing backend image to GAR..."
-                        docker tag $IMAGE_NAME_BACKEND:$IMAGE_TAG $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_BACKEND:$IMAGE_TAG
-                        docker push $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_BACKEND:$IMAGE_TAG
-                    '''
-                }
-            }
-        }
-
-    }
-    post {
-        always {
-            script {
-                def jobResult = currentBuild.result ?: 'SUCCESS'
-                def failedStage = 'None'
-                
-                if (jobResult != 'SUCCESS') {
-                    failedStage = env.STAGE_NAME ?: 'Unknown Stage'
-                }
-            }
-        }
         stage('Send to n8n') {
             steps {
                 script {
@@ -341,6 +315,25 @@ pipeline {
                             echo "Note: n8n took too long to generate the report (> 5 minutes)"
                         }
                     }
+                }
+            }
+        }
+
+        stage('Push Image to GAR') {
+            when {
+                expression { return params.PushToGar == true }
+            }
+            steps {
+                withCredentials([file(credentialsId: 'GCP-GAR', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    sh '''
+                        echo "Authenticating with GCP..."
+                        gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS"
+                        gcloud auth configure-docker $DOCKER_REG_URL
+
+                        echo "Tagging and pushing backend image to GAR..."
+                        docker tag $IMAGE_NAME_BACKEND:$IMAGE_TAG $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_BACKEND:$IMAGE_TAG
+                        docker push $DOCKER_REG_URL/$DOCKER_REG_NAME/$REG_REPO/$IMAGE_NAME_BACKEND:$IMAGE_TAG
+                    '''
                 }
             }
         }
