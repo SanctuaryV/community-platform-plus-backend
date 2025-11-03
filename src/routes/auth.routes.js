@@ -6,6 +6,7 @@ const authMiddleware = require('../middleware/auth.middleware')
 
 router.post('/Register', authController.register);
 router.post('/Login', authController.login);
-router.post('/authen', authMiddleware.authenticate);
+// Attach a final handler so calls to /authen that run the auth middleware get a response
+router.post('/authen', authMiddleware.authenticate, (req, res) => res.sendStatus(200));
 
 module.exports = router;
