@@ -4,7 +4,8 @@
   "main": "index.js",
   "scripts": {
     "test": "jest --runInBand",
-    "start": "nodemon src/server.js"
+    "start": "nodemon src/server.js",
+    "check-env": "node check-env.js"
   },
   "keywords": [],
   "author": "",

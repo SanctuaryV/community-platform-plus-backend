@@ -1,6 +1,6 @@
 // backend/src/middleware/auth.middleware.js
 const jwt = require('jsonwebtoken');
-const secret = 'token-for-join';
+const secret = process.env.JWT_SECRET || 'token-for-join';
 
 exports.authenticate = (req, res) => {
     try {

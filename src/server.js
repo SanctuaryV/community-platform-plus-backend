@@ -1,7 +1,8 @@
+require('dotenv').config();
 const express = require('express');
-const http = require('http');                // NEW
+const http = require('http');
 const cors = require('cors');
-const { Server } = require('socket.io');     // prefer import style
+const { Server } = require('socket.io');
 const bodyParser = require('body-parser');
 const authRoutes = require('./routes/auth.routes');
 const chat = require('./routes/chat.routes');
@@ -15,10 +16,12 @@ const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 5000;
+const host = process.env.HOST || '0.0.0.0';
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
 
 // CORS for REST (since we proxy via Nginx, this can be permissive or specific)
 app.use(cors({
-  origin: 'http://34.142.188.91',   // or your real domain; same-origin via proxy
+  origin: corsOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT']
 }));
@@ -44,13 +47,18 @@ app.use('/', mainRoutes);
 
 // Create HTTP server explicitly and attach Socket.IO with explicit PATH
 const server = http.createServer(app);
+const socketPath = process.env.SOCKET_PATH || '/socket.io';
+const socketTransports = process.env.SOCKET_TRANSPORTS 
+  ? process.env.SOCKET_TRANSPORTS.split(',') 
+  : ['websocket', 'polling'];
+
 const io = new Server(server, {
-  path: '/socket.io',
-  transports: ['websocket', 'polling'],
+  path: socketPath,
+  transports: socketTransports,
   // With Nginx same-origin proxy, CORS is not required for WS,
   // but leaving it explicit is okay:
   cors: {
-    origin: 'http://34.142.188.91',
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -88,6 +96,9 @@ connection.connect((err) => {
 });
 
 // Start server
-server.listen(port, '0.0.0.0', () => {
-  console.log(`Server is running on port ${port}`);
+server.listen(port, host, () => {
+  console.log(`Server is running on ${host}:${port}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`CORS Origin: ${corsOrigin}`);
+  console.log(`Socket.IO Path: ${socketPath}`);
 });

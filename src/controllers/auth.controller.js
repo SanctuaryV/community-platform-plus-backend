@@ -2,7 +2,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const connection = require('../config/db.config');
-const secret = 'token-for-join';
+const secret = process.env.JWT_SECRET || 'token-for-join';
 
 const saltRounds = 10;
 
