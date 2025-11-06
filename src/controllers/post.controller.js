@@ -2,6 +2,7 @@ const connection = require('../config/db.config'); // เชื่อมต่�
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const Logger = require('../utils/logger');
 
 // ตั้งค่า Multer
 const storage = multer.diskStorage({
@@ -19,6 +20,8 @@ const upload = multer({ storage });
 // ฟังก์ชันสำหรับดึงโพสต์
 exports.getPosts = (req, res) => {
     const communityId = req.params.communityId;
+    Logger.apiStart('POST', 'Get Posts', { communityId });
+    
     const query = `
         SELECT posts.*, 
                users.avatar_url AS avatar_url, 
@@ -48,8 +51,11 @@ exports.getPosts = (req, res) => {
   
     connection.query(query, [communityId], (err, results) => {
         if (err) {
+            Logger.error('POST', 'Error fetching posts', err);
             return res.status(500).json({ message: 'Error fetching posts', error: err });
         }
+        
+        Logger.success('POST', `Fetched ${results.length} posts`, { communityId, count: results.length });
         
         // เปลี่ยนคอมเมนต์จาก JSON string กลับเป็นอาร์เรย์ว่างหากไม่มีคอมเมนต์
         results.forEach(post => {
@@ -72,6 +78,7 @@ exports.getPosts = (req, res) => {
             }
         });
 
+        Logger.apiEnd('POST', 'Get Posts');
         res.status(200).json(results);
     });
 };
@@ -79,12 +86,16 @@ exports.getPosts = (req, res) => {
 
 // ฟังก์ชันสำหรับการสร้างโพสต์
 exports.createPost = (req, res) => {
+    Logger.apiStart('POST', 'Create Post', { hasFile: !!req.file });
+    
     upload.single('image')(req, res, (err) => {
         if (err) {
+            Logger.error('POST', 'Error uploading file', err);
             return res.status(500).json({ message: 'Error uploading file', error: err });
         }
 
     const { group_id, user_id, content } = req.body;
+    Logger.info('POST', 'Post data received', { group_id, user_id, hasContent: !!content });
     const image_url = req.file ? `${req.protocol}://${req.get('host')}/post/${req.file.filename}` : null; // เก็บ path ของรูปภาพ
 
         if (!content && !image_url) {
@@ -115,9 +126,13 @@ exports.createPost = (req, res) => {
                 const query = 'INSERT INTO posts (user_id, content, image_url, group_id) VALUES (?, ?, ?, ?)';
                 connection.query(query, [user_id, content, image_url, group_id], (err, results) => {
                     if (err) {
+                        Logger.error('POST', 'Error creating post', err);
                         return res.status(500).json({ message: 'Error creating post', error: err });
                     }
 
+                    Logger.success('POST', 'Post created successfully', { post_id: results.insertId, user_id, group_id });
+                    Logger.apiEnd('POST', 'Create Post');
+                    
                     res.status(201).json({
                         id: results.insertId,
                         user_id,
@@ -137,6 +152,7 @@ exports.createPost = (req, res) => {
 // ฟังก์ชันสำหรับการลบโพสต์
 exports.deletePost = (req, res) => {
     const { post_id } = req.body;
+    Logger.apiStart('POST', 'Delete Post', { post_id });
   
     const getPostQuery = 'SELECT image_url FROM posts WHERE id = ?';
     connection.query(getPostQuery, [post_id], (err, results) => {
@@ -168,8 +184,11 @@ exports.deletePost = (req, res) => {
       const deleteQuery = 'DELETE FROM posts WHERE id = ?';
       connection.query(deleteQuery, [post_id], (err, results) => {
         if (err) {
+          Logger.error('POST', 'Error deleting post', err);
           return res.status(500).json({ message: 'Error deleting post', error: err });
         }
+        Logger.success('POST', 'Post deleted successfully', { post_id });
+        Logger.apiEnd('POST', 'Delete Post');
         res.status(200).json({ message: 'Post deleted successfully' });
       });
     });
@@ -177,12 +196,16 @@ exports.deletePost = (req, res) => {
 
 // ฟังก์ชันสำหรับการอัปเดตโพสต์
 exports.updatePost = (req, res) => {
+    Logger.apiStart('POST', 'Update Post');
+    
     upload.single('image')(req, res, (err) => {
         if (err) {
+            Logger.error('POST', 'Error uploading file', err);
             return res.status(500).json({ message: 'Error uploading file', error: err });
         }
 
     const { post_id, user_id, content } = req.body;
+    Logger.info('POST', 'Update post data', { post_id, user_id });
     const image_url = req.file ? `${req.protocol}://${req.get('host')}/post/${req.file.filename}` : null;
 
         const getPostQuery = 'SELECT user_id, image_url FROM posts WHERE id = ?';
@@ -216,9 +239,13 @@ exports.updatePost = (req, res) => {
             const updateQuery = 'UPDATE posts SET content = ?, image_url = ? WHERE id = ?';
             connection.query(updateQuery, [content, image_url || results[0].image_url, post_id], (err, updateResults) => {
                 if (err) {
+                    Logger.error('POST', 'Error updating post', err);
                     return res.status(500).json({ message: 'Error updating post', error: err });
                 }
 
+                Logger.success('POST', 'Post updated successfully', { post_id });
+                Logger.apiEnd('POST', 'Update Post');
+                
                 res.status(200).json({
                     message: 'Post updated successfully',
                     post_id,
@@ -233,8 +260,10 @@ exports.updatePost = (req, res) => {
 // ฟังก์ชันสำหรับการเพิ่มคอมเมนต์
 exports.addComment = (req, res) => {
     const { post_id, user_id, content, avatar_url } = req.body; // เพิ่ม avatar_url
+    Logger.apiStart('POST', 'Add Comment', { post_id, user_id });
 
     if (!content) {
+        Logger.warn('POST', 'Comment content is required');
         return res.status(400).json({ message: 'Comment content is required' });
     }
 
@@ -242,9 +271,13 @@ exports.addComment = (req, res) => {
     const query = 'INSERT INTO comments (post_id, user_id, content, avatar_url) VALUES (?, ?, ?, ?)';
     connection.query(query, [post_id, user_id, content, avatar_url], (err, results) => {
         if (err) {
+            Logger.error('POST', 'Error adding comment', err);
             return res.status(500).json({ message: 'Error adding comment', error: err });
         }
 
+        Logger.success('POST', 'Comment added successfully', { comment_id: results.insertId, post_id });
+        Logger.apiEnd('POST', 'Add Comment');
+        
         // ส่งข้อมูลกลับไปยัง Front-End รวมถึง avatar_url
         res.status(201).json({
             id: results.insertId,
@@ -261,6 +294,7 @@ exports.addComment = (req, res) => {
 // ฟังก์ชันสำหรับการลบคอมเมนต์
 exports.deleteComment = (req, res) => {
     const { comment_id, user_id } = req.body;
+    Logger.apiStart('POST', 'Delete Comment', { comment_id, user_id });
 
     const getCommentQuery = 'SELECT user_id FROM comments WHERE id = ?';
     connection.query(getCommentQuery, [comment_id], (err, results) => {
@@ -278,8 +312,11 @@ exports.deleteComment = (req, res) => {
         const deleteQuery = 'DELETE FROM comments WHERE id = ?';
         connection.query(deleteQuery, [comment_id], (err, results) => {
             if (err) {
+                Logger.error('POST', 'Error deleting comment', err);
                 return res.status(500).json({ message: 'Error deleting comment', error: err });
             }
+            Logger.success('POST', 'Comment deleted successfully', { comment_id });
+            Logger.apiEnd('POST', 'Delete Comment');
             res.status(200).json({ message: 'Comment deleted successfully' });
         });
     });
@@ -288,6 +325,7 @@ exports.deleteComment = (req, res) => {
 // ฟังก์ชันสำหรับการเพิ่มไลค์
 exports.addLike = (req, res) => {
     const { post_id, user_id } = req.body;
+    Logger.apiStart('POST', 'Add Like', { post_id, user_id });
 
     const checkLikeQuery = 'SELECT * FROM likes WHERE post_id = ? AND user_id = ?';
     connection.query(checkLikeQuery, [post_id, user_id], (err, results) => {
@@ -302,9 +340,13 @@ exports.addLike = (req, res) => {
         const query = 'INSERT INTO likes (post_id, user_id) VALUES (?, ?)';
         connection.query(query, [post_id, user_id], (err, results) => {
             if (err) {
+                Logger.error('POST', 'Error adding like', err);
                 return res.status(500).json({ message: 'Error adding like', error: err });
             }
 
+            Logger.success('POST', 'Like added successfully', { post_id, user_id });
+            Logger.apiEnd('POST', 'Add Like');
+            
             res.status(201).json({
                 message: 'Like added successfully',
                 post_id,
@@ -318,17 +360,22 @@ exports.addLike = (req, res) => {
 // ฟังก์ชันสำหรับการลบไลค์
 exports.removeLike = (req, res) => {
     const { post_id, user_id } = req.body;
+    Logger.apiStart('POST', 'Remove Like', { post_id, user_id });
 
     const query = 'DELETE FROM likes WHERE post_id = ? AND user_id = ?';
     connection.query(query, [post_id, user_id], (err, results) => {
         if (err) {
+            Logger.error('POST', 'Error removing like', err);
             return res.status(500).json({ message: 'Error removing like', error: err });
         }
 
         if (results.affectedRows === 0) {
+            Logger.warn('POST', 'Like not found', { post_id, user_id });
             return res.status(400).json({ message: 'Like not found' });
         }
 
+        Logger.success('POST', 'Like removed successfully', { post_id, user_id });
+        Logger.apiEnd('POST', 'Remove Like');
         res.status(200).json({ message: 'Like removed successfully' });
     });
 };

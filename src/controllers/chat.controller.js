@@ -1,8 +1,10 @@
 const connection = require('../config/db.config');
+const Logger = require('../utils/logger');
 
 // ดึงรายชื่อผู้ที่เราติดตาม โดยรับ userId จาก request body
 exports.getFollowing = (req, res) => {
     const { userId } = req.body; // รับ userId จาก body ของ request
+    Logger.apiStart('CHAT', 'Get Following', { userId });
 
     const query = `
       SELECT u.user_id AS userId, u.name, u.avatar_url AS avatarUrl
@@ -15,9 +17,11 @@ exports.getFollowing = (req, res) => {
     // ใช้ callback ในการ query ข้อมูล
     connection.query(query, [userId], (err, rows) => {
         if (err) {
-            console.error('Error fetching following:', err);
+            Logger.error('CHAT', 'Error fetching following', err);
             return res.status(500).json({ message: 'Error fetching following list' });
         }
+        Logger.success('CHAT', `Fetched ${rows.length} following users`, { userId, count: rows.length });
+        Logger.apiEnd('CHAT', 'Get Following');
         // ส่งข้อมูลผู้ที่เราติดตามกลับไป
         res.status(200).json(rows);
     });
@@ -25,6 +29,7 @@ exports.getFollowing = (req, res) => {
 
 exports.getOrCreateRoom = (req, res) => {
     const { userId, otherUserId } = req.body;
+    Logger.apiStart('CHAT', 'Get or Create Room', { userId, otherUserId });
 
     // ตรวจสอบห้องแชทที่มีอยู่แล้ว
     const checkRoomQuery = `
@@ -34,22 +39,28 @@ exports.getOrCreateRoom = (req, res) => {
 
     connection.query(checkRoomQuery, [userId, otherUserId, otherUserId, userId], (err, results) => {
         if (err) {
+            Logger.error('CHAT', 'Database query error', err);
             return res.status(500).json({ error: 'Database query error' });
         }
 
         if (results.length > 0) {
-
+            Logger.success('CHAT', 'Existing room found', { roomId: results[0].room_id });
+            Logger.apiEnd('CHAT', 'Get or Create Room');
             // ถ้ามีห้องแชทแล้ว
             return res.json({ roomId: results[0].room_id });
         } else {
             // ถ้าไม่มีห้องแชท, สร้างห้องใหม่
+            Logger.info('CHAT', 'Creating new room');
             const createRoomQuery = `
               INSERT INTO rooms (user1_id, user2_id) VALUES (?, ?)
             `;
             connection.query(createRoomQuery, [userId, otherUserId], (err, result) => {
                 if (err) {
+                    Logger.error('CHAT', 'Failed to create room', err);
                     return res.status(500).json({ error: 'Failed to create room' });
                 }
+                Logger.success('CHAT', 'New room created', { roomId: result.insertId });
+                Logger.apiEnd('CHAT', 'Get or Create Room');
                 return res.json({ roomId: result.insertId }); // ส่ง roomId ของห้องใหม่ที่สร้างขึ้น
             });
         }
@@ -59,13 +70,17 @@ exports.getOrCreateRoom = (req, res) => {
 // ฟังก์ชันในการดึงข้อความ
 exports.getMessages = (req, res) => {
     const { roomId } = req.body;  // รับ roomId จาก body ของ POST request
+    Logger.apiStart('CHAT', 'Get Messages', { roomId });
+    
     const query = 'SELECT * FROM messages WHERE room_id = ? ORDER BY timestamp ASC';
     
     connection.execute(query, [roomId], (err, result) => {
       if (err) {
-        console.error('Error fetching messages:', err);
+        Logger.error('CHAT', 'Error fetching messages', err);
         return res.status(500).json({ error: 'Error fetching messages' });
       }
+      
+      Logger.success('CHAT', `Fetched ${result.length} messages`, { roomId, count: result.length });
       
       // แปลง sender_id เป็น senderId และแปลงค่าเป็น string
       const updatedResult = result.map((message) => {
@@ -77,6 +92,7 @@ exports.getMessages = (req, res) => {
         return updatedMessage;
       });
   
+      Logger.apiEnd('CHAT', 'Get Messages');
       res.json(updatedResult); // ส่งผลลัพธ์ที่ปรับปรุงแล้วกลับไป
     });
   };

@@ -3,6 +3,7 @@ const connection = require('../config/db.config');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const Logger = require('../utils/logger');
 
 // ตรวจสอบว่าไฟล์ที่อัปโหลดอยู่ในโฟลเดอร์ uploads หรือไม่
 fs.readdir(path.join(__dirname, '../..', 'uploads'), (err, files) => {
@@ -52,6 +53,7 @@ const upload = multer({
 
 exports.getUserProfile = (req, res) => {
   const userId = req.params.userId; // ดึง userId จาก params
+  Logger.apiStart('PROFILE', 'Get User Profile', { userId });
 
   const sql = `
     SELECT 
@@ -81,12 +83,16 @@ exports.getUserProfile = (req, res) => {
 
   connection.execute(sql, [userId], (err, results) => {
     if (err) {
+      Logger.error('PROFILE', 'Database error fetching user profile', err);
       return res.status(500).json({ message: 'Database error', error: err });
     }
 
     if (results.length === 0) {
+      Logger.warn('PROFILE', 'User not found', { userId });
       return res.status(404).json({ message: 'User not found' });
     }
+    
+    Logger.success('PROFILE', 'User profile fetched successfully', { userId, name: results[0].name });
 
     const userProfile = results[0];
 
