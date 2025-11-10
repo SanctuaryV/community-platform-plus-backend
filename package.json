@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "jest --runInBand",
-    "start": "nodemon src/server.js",
-     "lint": "eslint ."
+  "test": "jest --runInBand",
+  "start": "nodemon src/server.js",
+  "lint": "eslint ."
   },
   "keywords": [],
   "author": "",
