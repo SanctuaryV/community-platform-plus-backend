@@ -3,11 +3,11 @@ kind: Service
 metadata:
   name: backend-service
   labels:
-    app: community-backend
+    app: communities-platform-argo
 spec:
   type: ClusterIP
   selector:
-    app: community-backend
+    app: communities-platform-argo
   ports:
     - protocol: TCP
       port: 80

@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: community-backend
-  namespace: argocd
+  namespace: communities-platform-argo
 spec:
   project: default
   source:
@@ -11,7 +11,7 @@ spec:
     path: "k8s"
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: community-platform-argo
+    namespace: communities-platform-argo
   syncPolicy:
     automated:
       prune: true
