@@ -1,0 +1,5 @@
+node_modules/
+uploads/
+coverage/
+**/*.test.js
+src/**/__mocks__/**
