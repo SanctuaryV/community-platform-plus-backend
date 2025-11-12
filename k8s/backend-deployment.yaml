@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: community-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: community-backend
+  template:
+    metadata:
+      labels:
+        app: community-backend
+    spec:
+      containers:
+        - name: backend
+          image: docker.io/sanctuaryv/community-platform-plus-backend:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: PORT
+              value: "5000"
+            - name: DB_HOST
+              value: "mysql.communities-platform.svc.cluster.local"
+            - name: DB_USER
+              value: "appuser"
+            - name: DB_PASS
+              value: "apppass"
+            - name: DB_NAME
+              value: "community_platform"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"

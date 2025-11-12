@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: community-backend
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: "https://github.com/SanctuaryV/community-platform-plus-backend.git"
+    targetRevision: "main"
+    path: "k8s"
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: community-platform-argo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: "5s"
+        factor: 2
+        maxDuration: "3m"
+  # Optional: if you use Kustomize or Helm, add `kustomize` or `helm` config here.
