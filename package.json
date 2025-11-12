@@ -5,7 +5,7 @@
   "scripts": {
   "test": "jest --runInBand",
   "start": "nodemon src/server.js",
-  "lint": "eslint ."
+  "lint": "eslint .",
   "check-env": "node check-env.js"
   },
   "keywords": [],
