@@ -26,6 +26,18 @@ spec:
           env:
             - name: PORT
               value: "5000"
+            - name: DB_HOST
+              value: "mysql.communities-platform-argo.svc.cluster.local"
+            - name: DB_USER
+              value: "appuser"
+            - name: DB_PASS
+              value: "apppass"
+            - name: DB_NAME
+              value: "community_platform"
+            - name: DB_PORT
+              value: "3306"
+            - name: CORS_ORIGIN
+              value: "http://34.142.198.53"
           readinessProbe:
             httpGet:
               path: /health

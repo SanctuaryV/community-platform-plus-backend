@@ -38,7 +38,7 @@ app.use((req, res, next) => {
 
 // CORS for REST (since we proxy via Nginx, this can be permissive or specific)
 app.use(cors({
-  origin: corsOrigin,
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT']
 }));
@@ -75,7 +75,7 @@ const io = new Server(server, {
   // With Nginx same-origin proxy, CORS is not required for WS,
   // but leaving it explicit is okay:
   cors: {
-    origin: corsOrigin,
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     methods: ['GET', 'POST'],
     credentials: true
   }
