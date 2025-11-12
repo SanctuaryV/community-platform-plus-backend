@@ -16,7 +16,8 @@ spec:
     spec:
       containers:
         - name: backend
-          image: docker.io/sanctuaryv/community-platform-plus-backend:latest
+          image: 'asia-southeast1-docker.pkg.dev/my-gcp-project/community-platform/community-platform-plus-backend:latest'
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
           env:
@@ -49,3 +50,5 @@ spec:
             requests:
               cpu: "100m"
               memory: "128Mi"
+          imagePullSecrets:
+           - name: gcp-artifact-secret
