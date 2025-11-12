@@ -2,9 +2,9 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: community-platform-backend
-  namespace: argocd
+  namespace: communities-platform-argo
 spec:
-  project: default
+  project: community-platform-intern
   source:
     repoURL: https://github.com/SanctuaryV/community-platform-plus-backend.git
     targetRevision: main
