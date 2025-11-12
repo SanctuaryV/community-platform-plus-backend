@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: 'asia-southeast1-docker.pkg.dev/my-gcp-project/community-platform/community-platform-plus-backend:latest'
+          image: 'asia-southeast1-docker.pkg.dev/tdg-sec-non-prod-bnxe/community-platform-plus/community-platform-plus-backend:latest'
           imagePullPolicy: Always
           ports:
             - containerPort: 5000
