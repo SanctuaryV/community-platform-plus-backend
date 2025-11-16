@@ -111,13 +111,14 @@ io.on('connection', (socket) => {
   });
 });
 
-// DB connect
-connection.connect((err) => {
+// Test DB connection (pools connect automatically on first query)
+connection.query('SELECT 1', (err) => {
   if (err) {
-    console.error('error connecting: ' + err.stack);
-    return;
+    console.error('❌ Database connection failed:', err.message);
+    console.error('Stack:', err.stack);
+  } else {
+    console.log('✓ Database connection pool ready');
   }
-  console.log('connected to database');
 });
 
 // Start server
